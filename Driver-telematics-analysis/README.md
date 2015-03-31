@@ -12,6 +12,11 @@ The data was anonymized by randomly rotating and/or mirror images of the drivers
 •	Minimum deceleration
 •	The standard deviation of the acceleration
 ```
+Plots of the position history, speed, and acceleration can be seen below.  The acceleration plot shows the raw (noisy) data, and the cleaned acceleration data using a Fourier transform.
+![alt tag](https://github.com/brainsqueeze/Kaggle-competitions/blob/master/Driver-telematics-analysis/plots/history_1-1.png)
+![alt tag](https://github.com/brainsqueeze/Kaggle-competitions/blob/master/Driver-telematics-analysis/plots/velocity_1-1.png)
+![alt tag](https://github.com/brainsqueeze/Kaggle-competitions/blob/master/Driver-telematics-analysis/plots/acceleration_1-1.png)
+
 I also included checks for whether the driver was driving on highways, main roads (not highways) and/or back roads, as well as the average speeds and the percentage of the total trip spent in each of those situations.  There were also features for:
 ```sh
 •	Return trip? (Boolean, check if the second half of the trip returns within an epsilon ball of the origin with a fixed radius, and a Euclidean metric)
@@ -22,13 +27,9 @@ The acceleration data was very noisy since it is a second order derivative of th
 •	20-bin histogram of linear acceleration values
 •	20-bin histogram of speed values
 ```
-
-In order to classify the drivers I used a random forest with 500 trees, where at each node of the individual trees I grew the next branch by optimizing the information entropy, while checking a minimum of 5 features.  I performed a 5-fold cross-validation to validate my model.  This approach resulted in an 'Area Under the Curve' score of 0.86297 on Kaggle, and I finished the competition in the top 25% of competitors.
-
-Some sample data visualizations can be seen below:
-![alt tag](https://github.com/brainsqueeze/Kaggle-competitions/blob/master/Driver-telematics-analysis/plots/history_1-1.png)
-![alt tag](https://github.com/brainsqueeze/Kaggle-competitions/blob/master/Driver-telematics-analysis/plots/velocity_1-1.png)
-![alt tag](https://github.com/brainsqueeze/Kaggle-competitions/blob/master/Driver-telematics-analysis/plots/acceleration_1-1.png)
+Some sample histogram visualizations can be seen below:
 ![alt tag](https://github.com/brainsqueeze/Kaggle-competitions/blob/master/Driver-telematics-analysis/plots/Speed_hist.png)
 ![alt tag](https://github.com/brainsqueeze/Kaggle-competitions/blob/master/Driver-telematics-analysis/plots/Accel_hist.png)
 ![alt tag](https://github.com/brainsqueeze/Kaggle-competitions/blob/master/Driver-telematics-analysis/plots/Cent_Accel_hist.png)
+
+In order to classify the drivers I used a random forest with 500 trees, where at each node of the individual trees I grew the next branch by optimizing the information entropy, while checking a minimum of 5 features.  I performed a 5-fold cross-validation to validate my model.  This approach resulted in an 'Area Under the Curve' score of 0.86297 on Kaggle, and I finished the competition in the top 25% of competitors.
