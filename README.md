@@ -1,2 +1,2 @@
 # Kaggle-competitions
-A repository for code and data subsets used in different Kaggle data science competitions.
+A repository for code and data subsets used in different Kaggle data science competitions.  A summary of competition results can be seen here: https://www.kaggle.com/users/276955/dave .
