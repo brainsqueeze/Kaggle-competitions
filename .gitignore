@@ -59,3 +59,7 @@ target/
 # IDE configs
 /.idea
 /.vscode
+
+# data
+**/data/config*
+*.csv
