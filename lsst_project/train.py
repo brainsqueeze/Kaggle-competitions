@@ -2,6 +2,7 @@ from lsst_project.src.model import Classifier
 from lsst_project.data import utils
 
 import pandas as pd
+import numpy as np
 import torch
 
 
@@ -13,34 +14,59 @@ def log(message):
 def pre_process(data, meta_data):
     assert isinstance(data, pd.DataFrame)
     data["unix_time"] = utils.mjd_to_unix_time(data.mjd)
-    data = data.join(meta_data, on="object_id", lsuffix="_main", rsuffix="_meta")
+    data = data.set_index('object_id').join(meta_data.set_index('object_id'))
 
     data["distmod"].fillna(0, inplace=True)
     return data
 
 
-def batch_generator(data, batch_ids, max_length, columns, one_hot_lookup):
-    data = data[data.object_id_main.isin(batch_ids)]
-    lengths = data.groupby(by="object_id_main").size().as_matrix()
-    x_train = [data[data.object_id_main == object_id][columns].as_matrix() for object_id in batch_ids]
+def scale_data(data, columns):
+    features = data[columns]
+    mean, variance = features.mean(), features.std()
 
-    target = data[data.object_id_main.isin(batch_ids)].groupby("object_id_main").target.unique().astype(float).values
+    # m_dict, v_dict = mean.to_dict(), variance.to_dict()
+    # todo store this lookup for retrieval at inference time
+    # lookup = {col: {"mean": avg, "variance": var} for (col, avg), (_, var) in zip(m_dict.items(), v_dict.items())}
+
+    data[columns] -= mean
+    data[columns] /= variance
+    return data, (mean, variance)
+
+
+def shuffle_sample(object_ids, batch_size, num_batches, seed=0):
+    np.random.seed(seed)
+    ids = np.random.permutation(object_ids)
+
+    for batch_num in range(num_batches):
+        yield ids[batch_num * batch_size: (batch_num + 1) * batch_size]
+
+
+def batch_generator(data, batch_ids, max_length, columns, one_hot_lookup):
+    data = data[data.index.isin(batch_ids)]
+
+    # need to sort everything in descending by sequence lengths
+    # because that is the format that sequence packing method expects
+    lengths = data.groupby(data.index).size()[batch_ids].sort_values(ascending=False)
+    sorted_batch_ids = lengths.index
+    x_train = [data[data.index == object_id][columns].values for object_id in sorted_batch_ids]
+
+    target = data.groupby(data.index).target.unique()[sorted_batch_ids].astype(float).values
     target = utils.encode_targets(target_array=target, col_lookup=one_hot_lookup)
 
     seq_tensor = torch.autograd.Variable(torch.zeros((len(x_train), max_length, len(columns)))).float()
     for idx, (seq, seqlen) in enumerate(zip(x_train, lengths)):
         seq_tensor[idx, :seqlen] = torch.tensor(seq, dtype=torch.float32)
-    return seq_tensor, torch.tensor(target, dtype=torch.long), lengths
+    return seq_tensor, torch.tensor(target, dtype=torch.long), lengths.values
 
 
-def run():
+def run(num_epochs=2, batch_size=32, num_batches=50):
     log("Loading data")
     meta = utils.load_meta_data(training=True)
     data = utils.load_data(training=True)
     data = pre_process(data=data, meta_data=meta)
 
     log("Getting longest sequence for padding information")
-    lengths = data.groupby(by="object_id_main").size().as_matrix()
+    lengths = data.groupby(data.index).size().values
 
     columns_to_exclude = {
         "object_id_main",
@@ -53,32 +79,57 @@ def run():
     }
     feature_columns = [col for col in data.columns if col not in columns_to_exclude]
 
+    log("Scaling data")
+    data, _ = scale_data(data=data, columns=feature_columns)
+
     max_length = lengths.max()
     classes = sorted(meta.target.unique()) + [99]
     num_targets = len(classes)
     one_hot_lookup = {v: idx for idx, v in enumerate(classes)}
+    object_ids = meta.object_id.values
 
-    loss = torch.nn.CrossEntropyLoss()
     model = Classifier(
         num_features=len(feature_columns),
         num_classes=num_targets,
         max_sequence_length=max_length
     )
+    loss = torch.nn.CrossEntropyLoss()
+    opt = torch.optim.Adam(model.parameters())
 
-    # todo: replace the code below with actual mini-batching code, this is just unit testing
-    ids = [615, 713, 730]
-    seq_tensor, target, train_lengths = batch_generator(
-        data=data,
-        batch_ids=ids,
-        max_length=max_length,
-        columns=feature_columns,
-        one_hot_lookup=one_hot_lookup
-    )
+    for epoch in range(num_epochs):
 
-    output = model.forward(x=seq_tensor, sequence_lengths=train_lengths)
-    cost = loss(output, target)
-    return cost
+        log("\tEpoch: {epoch}".format(epoch=epoch + 1))
+        running_loss = 0
+        i = 0
+
+        for batch_ids in shuffle_sample(object_ids, batch_size, num_batches, seed=0):
+            seq_tensor, target, train_lengths = batch_generator(
+                data=data,
+                batch_ids=batch_ids,
+                max_length=max_length,
+                columns=feature_columns,
+                one_hot_lookup=one_hot_lookup
+            )
+
+            if seq_tensor.shape[0] == 0:
+                continue
+
+            opt.zero_grad()
+            outputs = model.forward(
+                x=seq_tensor,
+                sequence_lengths=train_lengths,
+                max_sequence_length=max_length
+            )
+            cost = loss(outputs, target)
+            cost.backward()
+            opt.step()
+
+            running_loss += cost.item()
+            if (i + 1) % 10 == 0:
+                print("\t\tloss: {loss}".format(loss=running_loss / 10))
+                running_loss = 0.0
+            i += 1
 
 
 if __name__ == '__main__':
-    run()
+    run(num_epochs=10, batch_size=64, num_batches=50)

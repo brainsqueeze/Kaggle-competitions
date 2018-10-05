@@ -49,13 +49,13 @@ class Classifier(nn.Module):
 
         self.dense = nn.Linear(in_features=flat_dims, out_features=num_classes)
 
-    def forward(self, x, sequence_lengths):
+    def forward(self, x, sequence_lengths, max_sequence_length):
         packed = nn.utils.rnn.pack_padded_sequence(x, lengths=sequence_lengths, batch_first=True)
 
         # ht is the hidden state for time-step = sequence length
         # ct is the cell state for time-step = sequence length
         output, (ht, ct) = self.lstm(packed)
-        output, _ = nn.utils.rnn.pad_packed_sequence(output, batch_first=True)
+        output, _ = nn.utils.rnn.pad_packed_sequence(output, total_length=max_sequence_length, batch_first=True)
 
         output = output.transpose(1, 2)  # need to swap inputs and sequences for CNN layers
         x = self.conv_1(output)
