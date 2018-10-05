@@ -4,6 +4,9 @@ from lsst_project.data import utils
 import pandas as pd
 import numpy as np
 import torch
+from torch.nn import functional as f
+
+from lsst_project.data import config
 
 
 def log(message):
@@ -59,6 +62,29 @@ def batch_generator(data, batch_ids, max_length, columns, one_hot_lookup):
     return seq_tensor, torch.tensor(target, dtype=torch.long), lengths.values
 
 
+def compute_f1(predictions, expectations, num_classes):
+    y = np.zeros((len(expectations), num_classes), dtype=np.float32)
+    y_hat = np.zeros((len(predictions), num_classes), dtype=np.float32)
+
+    y[np.arange(y.shape[0]), expectations] = 1
+    y_hat[np.arange(y_hat.shape[0]), predictions] = 1
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        tp = np.sum(y_hat * y, axis=0)
+        fp = np.sum(y_hat * (1 - y), axis=0)
+        fn = np.sum((1 - y_hat) * y, axis=0)
+
+        precision = tp / (tp + fp)
+        recall = tp / (tp + fn)
+
+        precision[np.isnan(precision)] = 0
+        recall[np.isnan(recall)] = 0
+
+        f1 = 2 * precision * recall / (precision + recall)
+        f1[np.isnan(f1)] = 0
+        return f1, (precision, recall)
+
+
 def run(num_epochs=2, batch_size=32, num_batches=50):
     log("Loading data")
     meta = utils.load_meta_data(training=True)
@@ -86,6 +112,7 @@ def run(num_epochs=2, batch_size=32, num_batches=50):
     classes = sorted(meta.target.unique()) + [99]
     num_targets = len(classes)
     one_hot_lookup = {v: idx for idx, v in enumerate(classes)}
+    class_lookup = {v: k for k, v in one_hot_lookup.items()}
     object_ids = meta.object_id.values
 
     model = Classifier(
@@ -100,6 +127,7 @@ def run(num_epochs=2, batch_size=32, num_batches=50):
 
         log("\tEpoch: {epoch}".format(epoch=epoch + 1))
         running_loss = 0
+        running_f1 = 0
         i = 0
 
         for batch_ids in shuffle_sample(object_ids, batch_size, num_batches, seed=0):
@@ -125,10 +153,18 @@ def run(num_epochs=2, batch_size=32, num_batches=50):
             opt.step()
 
             running_loss += cost.item()
+
+            # get the predicted classes
+            _, index = torch.max(f.softmax(outputs, dim=1), 1)
+            f1, _ = compute_f1(predictions=index, expectations=target, num_classes=num_targets)
+            running_f1 += f1.mean()
+
             if (i + 1) % 10 == 0:
-                print("\t\tloss: {loss}".format(loss=running_loss / 10))
+                print("\t\tloss: {loss} | average F1: {f1}".format(loss=running_loss / 10, f1=running_f1 / 10))
                 running_loss = 0.0
             i += 1
+
+        torch.save(model.state_dict(), config.MODEL_PATH + "model.pth")
 
 
 if __name__ == '__main__':
