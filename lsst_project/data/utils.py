@@ -2,6 +2,7 @@ from . import config
 import os
 
 import pandas as pd
+import numpy as np
 
 
 def mjd_to_unix_time(mjd_time):
@@ -24,3 +25,18 @@ def load_meta_data(training=True):
     if training:
         path = config.DATA_PATH + "training_set_metadata.csv"
     return pd.read_csv(path)
+
+
+def encode_targets(target_array, col_lookup):
+    assert isinstance(target_array, np.ndarray)
+    assert isinstance(col_lookup, dict)
+
+    return np.array([col_lookup[val] for val in target_array])
+
+
+def one_hot_encode(target_array, col_lookup):
+    columns = encode_targets(target_array, col_lookup)
+
+    targets = np.zeros((len(target_array), len(col_lookup)), dtype=np.float32)
+    targets[np.arange(len(targets)), columns] = 1
+    return targets
