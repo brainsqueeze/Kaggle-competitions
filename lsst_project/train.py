@@ -1,6 +1,8 @@
 from lsst_project.src.model import Classifier
 from lsst_project.data import utils
 
+import json
+
 import pandas as pd
 import numpy as np
 import torch
@@ -34,6 +36,12 @@ def scale_data(data, columns):
     data[columns] -= mean
     data[columns] /= variance
     return data, (mean, variance)
+
+
+def split_train_val_sets(object_ids, val_size=512):
+    np.random.seed(0)
+    ids = np.random.permutation(object_ids)
+    return ids[:val_size], ids[val_size:]
 
 
 def shuffle_sample(object_ids, batch_size, num_batches, seed=0):
@@ -85,11 +93,17 @@ def compute_f1(predictions, expectations, num_classes):
         return f1, (precision, recall)
 
 
-def run(num_epochs=2, batch_size=32, num_batches=50):
+def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
+        num_epochs=2, batch_size=32, num_batches=50):
     log("Loading data")
     meta = utils.load_meta_data(training=True)
     data = utils.load_data(training=True)
     data = pre_process(data=data, meta_data=meta)
+
+    log("Splitting training and cross-validation sets")
+    val_ids, train_ids = split_train_val_sets(object_ids=meta.object_id.values)
+    data_cv = data[data.index.isin(val_ids)]
+    data = data[data.index.isin(train_ids)]
 
     log("Getting longest sequence for padding information")
     lengths = data.groupby(data.index).size().values
@@ -106,31 +120,49 @@ def run(num_epochs=2, batch_size=32, num_batches=50):
     feature_columns = [col for col in data.columns if col not in columns_to_exclude]
 
     log("Scaling data")
-    data, _ = scale_data(data=data, columns=feature_columns)
+    data, (mean, variance) = scale_data(data=data, columns=feature_columns)
+    data_cv[feature_columns] = (data_cv[feature_columns] - mean) / variance
 
     max_length = lengths.max()
     classes = sorted(meta.target.unique()) + [99]
     num_targets = len(classes)
     one_hot_lookup = {v: idx for idx, v in enumerate(classes)}
-    class_lookup = {v: k for k, v in one_hot_lookup.items()}
-    object_ids = meta.object_id.values
+    # class_lookup = {v: k for k, v in one_hot_lookup.items()}
+    # object_ids = meta.object_id.values
+
+    with open(config.MODEL_PATH + "model.json", "w") as jf:
+        d = dict(
+            num_features=len(feature_columns),
+            num_classes=num_targets,
+            max_sequence_length=float(max_length),
+            lstm_dim=hidden_dims,
+            num_lstm_layers=num_hidden_layers,
+            lstm_dropout=lstm_dropout,
+            dense_dropout=dense_dropout
+        )
+
+        json.dump(d, jf, indent=2)
 
     model = Classifier(
         num_features=len(feature_columns),
         num_classes=num_targets,
-        max_sequence_length=max_length
+        max_sequence_length=max_length,
+        lstm_dim=hidden_dims,
+        num_lstm_layers=num_hidden_layers,
+        lstm_dropout=lstm_dropout,
+        dense_dropout=dense_dropout
     )
     loss = torch.nn.CrossEntropyLoss()
-    opt = torch.optim.Adam(model.parameters())
+    opt = torch.optim.Adam(model.parameters(), lr=1e-2)
 
     for epoch in range(num_epochs):
 
         log("\tEpoch: {epoch}".format(epoch=epoch + 1))
         running_loss = 0
-        running_f1 = 0
+        # running_f1 = 0
         i = 0
 
-        for batch_ids in shuffle_sample(object_ids, batch_size, num_batches, seed=0):
+        for batch_ids in shuffle_sample(train_ids, batch_size, num_batches, seed=0):
             seq_tensor, target, train_lengths = batch_generator(
                 data=data,
                 batch_ids=batch_ids,
@@ -154,18 +186,38 @@ def run(num_epochs=2, batch_size=32, num_batches=50):
 
             running_loss += cost.item()
 
-            # get the predicted classes
-            _, index = torch.max(f.softmax(outputs, dim=1), 1)
-            f1, _ = compute_f1(predictions=index, expectations=target, num_classes=num_targets)
-            running_f1 += f1.mean()
-
             if (i + 1) % 10 == 0:
-                print("\t\tloss: {loss} | average F1: {f1}".format(loss=running_loss / 10, f1=running_f1 / 10))
-                running_loss = 0.0
+                print("\t\tloss: {loss}".format(loss=running_loss / 10))
+                running_loss = 0
             i += 1
+
+        # evaluate the cross-validation set
+        seq_tensor, target, cv_lengths = batch_generator(
+            data=data_cv,
+            batch_ids=val_ids,
+            max_length=max_length,
+            columns=feature_columns,
+            one_hot_lookup=one_hot_lookup
+        )
+        outputs = model.forward(
+            x=seq_tensor,
+            sequence_lengths=cv_lengths,
+            max_sequence_length=max_length
+        )
+        _, index = torch.max(f.softmax(outputs, dim=1), 1)
+        f1, _ = compute_f1(predictions=index, expectations=target, num_classes=num_targets)
+        print("\tcross-validation class-averaged F1: {f1}".format(f1=f1.mean()))
 
         torch.save(model.state_dict(), config.MODEL_PATH + "model.pth")
 
 
 if __name__ == '__main__':
-    run(num_epochs=10, batch_size=64, num_batches=50)
+    run(
+        hidden_dims=32,
+        num_hidden_layers=2,
+        lstm_dropout=0.3,
+        dense_dropout=0.2,
+        num_epochs=10,
+        batch_size=64,
+        num_batches=50
+    )

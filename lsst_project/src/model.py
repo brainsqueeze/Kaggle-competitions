@@ -5,7 +5,7 @@ import torch.nn as nn
 class Classifier(nn.Module):
 
     def __init__(self, num_features, num_classes, max_sequence_length,
-                 lstm_dim=64, num_lstm_layers=1, lstm_dropout=0.):
+                 lstm_dim=64, num_lstm_layers=1, lstm_dropout=0., dense_dropout=0.):
         super(Classifier, self).__init__()
         conv_1_output_dim = lstm_dim // 2
         conv_2_output_dim = conv_1_output_dim // 2
@@ -47,6 +47,7 @@ class Classifier(nn.Module):
         self.conv1_dim = conv_1_output_dim
         self.conv2_dim = conv_2_output_dim
 
+        self.dense_dropout = nn.Dropout(p=dense_dropout)
         self.dense = nn.Linear(in_features=flat_dims, out_features=num_classes)
 
     def forward(self, x, sequence_lengths, max_sequence_length):
@@ -67,4 +68,5 @@ class Classifier(nn.Module):
 
         # flatten
         x = x.contiguous().view(x.shape[0], -1)
+        x = self.dense_dropout(x)
         return self.dense(x)
