@@ -8,6 +8,8 @@ import numpy as np
 import torch
 from torch.nn import functional as f
 
+import tensorflow as tf
+
 from lsst_project.data import config
 
 
@@ -131,7 +133,7 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
     classes = sorted(meta.target.unique()) + [99]
     num_targets = len(classes)
     one_hot_lookup = {v: idx for idx, v in enumerate(classes)}
-    # class_lookup = {v: k for k, v in one_hot_lookup.items()}
+    class_lookup = {v: k for k, v in one_hot_lookup.items()}
 
     with open(config.MODEL_PATH + "model.json", "w") as jf:
         d = dict(
@@ -158,11 +160,14 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
     loss = torch.nn.CrossEntropyLoss()
     opt = torch.optim.Adam(model.parameters(), lr=1e-2)
 
+    summary_writer_train = tf.summary.FileWriter(config.MODEL_PATH + 'training')
+    summary_writer_dev = tf.summary.FileWriter(config.MODEL_PATH + 'validation')
+
     for epoch in range(num_epochs):
 
         log("\tEpoch: {epoch}".format(epoch=epoch + 1))
         running_loss = 0
-        # running_f1 = 0
+        train_summary = tf.Summary()
         i = 0
 
         for batch_ids in shuffle_sample(train_ids, batch_size, num_batches, seed=0):
@@ -187,13 +192,17 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
             cost.backward()
             opt.step()
 
-            running_loss += cost.item()
+            train_cost = cost.item()
+            running_loss += train_cost
+            train_summary.value.add(tag="cost", simple_value=train_cost)
+            summary_writer_train.add_summary(train_summary, epoch * num_batches + i)
 
             if (i + 1) % 10 == 0:
                 print("\t\tloss: {loss}".format(loss=running_loss / 10))
                 running_loss = 0
             i += 1
 
+        summary_writer_train.flush()
         # evaluate the cross-validation set
         seq_tensor, target, cv_lengths = batch_generator(
             data=data_cv,
@@ -208,7 +217,16 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
             max_sequence_length=max_length
         )
         _, index = torch.max(f.softmax(outputs, dim=1), 1)
+        cv_cost = loss(outputs, target)
         f1, _ = compute_f1(predictions=index, expectations=target, num_classes=num_targets)
+
+        dev_summary = tf.Summary()
+        dev_summary.value.add(tag="cost", simple_value=cv_cost)
+        for i in range(len(f1)):
+            dev_summary.value.add(tag="F1-score/class-{label}".format(label=class_lookup[i]), simple_value=f1[i])
+
+        summary_writer_dev.add_summary(dev_summary, epoch * num_batches + i)
+        summary_writer_dev.flush()
         print("\tcross-validation class-averaged F1: {f1}".format(f1=f1.mean()))
 
         torch.save(model.state_dict(), config.MODEL_PATH + "model.pth")
@@ -220,7 +238,7 @@ if __name__ == '__main__':
         num_hidden_layers=2,
         lstm_dropout=0.3,
         dense_dropout=0.2,
-        num_epochs=10,
+        num_epochs=100,
         batch_size=64,
         num_batches=50
     )
