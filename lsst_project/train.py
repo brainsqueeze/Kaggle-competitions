@@ -57,16 +57,20 @@ def batch_generator(data, batch_ids, max_length, columns, one_hot_lookup):
 
     # need to sort everything in descending by sequence lengths
     # because that is the format that sequence packing method expects
-    lengths = data.groupby(data.index).size()[batch_ids].sort_values(ascending=False)
+    group = data.groupby(data.index)
+    lengths = group.size()[batch_ids].sort_values(ascending=False)
     sorted_batch_ids = lengths.index
-    x_train = [data[data.index == object_id][columns].values for object_id in sorted_batch_ids]
 
-    target = data.groupby(data.index).target.unique()[sorted_batch_ids].astype(float).values
+    target = group.target.unique()[sorted_batch_ids].astype(float).values
     target = utils.encode_targets(target_array=target, col_lookup=one_hot_lookup)
 
-    seq_tensor = torch.autograd.Variable(torch.zeros((len(x_train), max_length, len(columns)))).float()
-    for idx, (seq, seqlen) in enumerate(zip(x_train, lengths)):
-        seq_tensor[idx, :seqlen] = torch.tensor(seq, dtype=torch.float32)
+    seq_tensor = torch.autograd.Variable(torch.zeros((len(sorted_batch_ids), max_length, len(columns)))).float()
+    for i in range(len(sorted_batch_ids)):
+        object_id = sorted_batch_ids[i]
+        seq_len = lengths[object_id]
+        seq = data[data.index == object_id][columns].values
+        seq_tensor[i, :seq_len] = torch.tensor(seq, dtype=torch.float32)
+
     return seq_tensor, torch.tensor(target, dtype=torch.long), lengths.values
 
 
@@ -128,7 +132,6 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
     num_targets = len(classes)
     one_hot_lookup = {v: idx for idx, v in enumerate(classes)}
     # class_lookup = {v: k for k, v in one_hot_lookup.items()}
-    # object_ids = meta.object_id.values
 
     with open(config.MODEL_PATH + "model.json", "w") as jf:
         d = dict(
