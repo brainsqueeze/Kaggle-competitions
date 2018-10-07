@@ -111,6 +111,8 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
     data_cv = data[data.index.isin(val_ids)]
     data = data[data.index.isin(train_ids)]
 
+    print("\tTraining with {size} examples".format(size=len(train_ids)))
+
     log("Getting longest sequence for padding information")
     lengths = data.groupby(data.index).size().values
 
@@ -238,7 +240,7 @@ if __name__ == '__main__':
         num_hidden_layers=2,
         lstm_dropout=0.3,
         dense_dropout=0.2,
-        num_epochs=100,
+        num_epochs=10000,
         batch_size=64,
-        num_batches=50
+        num_batches=100
     )
