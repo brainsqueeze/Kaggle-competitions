@@ -7,6 +7,7 @@ class Classifier(nn.Module):
     def __init__(self, num_features, num_classes, max_sequence_length, lstm_dim=64, num_lstm_layers=1,
                  lstm_dropout=0., dense_dropout=0., conv_dropout=0.):
         super(Classifier, self).__init__()
+        max_sequence_length = int(max_sequence_length)
         conv_1_output_dim = lstm_dim // 2
         conv_2_output_dim = conv_1_output_dim // 2
 

@@ -158,7 +158,9 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
 
     with open(config.MODEL_PATH + "data.json", "w") as jf:
         d = {
-            "classes": class_lookup,
+            "classes": {col: int(label) for col, label in class_lookup.items()},
+            "columns": feature_columns,
+            "max_seq_length": int(max_length),
             "stats": {
                 "mean": {k: float(v["mean"]) for k, v in stats_lookup.items()},
                 "variance": {k: float(v["variance"]) for k, v in stats_lookup.items()}
@@ -256,7 +258,7 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
 
 
 if __name__ == '__main__':
-    USE_GPU = True
+    USE_GPU = False
 
     run(
         hidden_dims=16,

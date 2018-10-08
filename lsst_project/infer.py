@@ -2,22 +2,33 @@ from torch.nn import functional as f
 import torch
 import numpy as np
 
+from lsst_project.src.model import Classifier
+
 from lsst_project.data import utils
 
 import pandas as pd
 import json
 import csv
+import os
 
 from lsst_project.data import config
 
 BATCH_SIZE = 512
-model = torch.load(config.MODEL_PATH + "model.pth")
+root = os.path.dirname(os.path.abspath(__file__))
+model_state = torch.load(config.MODEL_PATH + "model.pth")
+with open(config.MODEL_PATH + "model.json", "r") as jf:
+    params = json.load(jf)
+model = Classifier(**params)
+model.load_state_dict(model_state)
 
 with open(config.MODEL_PATH + "data.json", "r") as jf:
     d = json.load(jf)
-    one_hot_lookup = d["classes"]
-    mean = d["stats"]["mean"]
-    variance = d["stats"]["variance"]
+    one_hot_lookup = {int(k): v for k, v in d["classes"].items()}
+    max_length = d["max_seq_length"]
+    feature_columns = d["columns"]
+    mean = pd.Series(d["stats"]["mean"])
+    variance = pd.Series(d["stats"]["variance"])
+class_lookup = {v: k for k, v in one_hot_lookup.items()}
 
 
 def number_caster(value):
@@ -54,6 +65,7 @@ def stream_test_set():
             else:
                 objects_to_return = objects[:]
                 objects = []
+                num_objects = 1
                 yield objects_to_return
 
         if len(objects) > 0:
@@ -69,8 +81,34 @@ def pre_process(data, meta_data):
     return data
 
 
-def run_inference(seq_tensor, num_classes):
-    outputs = model.forward(seq_tensor)
+def batch_generator(data, batch_ids):
+    data = data[data.index.isin(batch_ids)]
+
+    # need to sort everything in descending by sequence lengths
+    # because that is the format that sequence packing method expects
+    group = data.groupby(data.index)
+    lengths = group.size()[batch_ids].sort_values(ascending=False)
+    sorted_batch_ids = lengths.index
+
+    seq_tensor = torch.autograd.Variable(torch.zeros((len(sorted_batch_ids), max_length, len(feature_columns)))).float()
+    if USE_GPU:
+        seq_tensor = seq_tensor.cuda()
+
+    for i in range(len(sorted_batch_ids)):
+        object_id = sorted_batch_ids[i]
+        seq_len = lengths[object_id]
+        seq = data[data.index == object_id][feature_columns].values
+        seq_tensor[i, :min(seq_len, max_length)] = torch.tensor(seq[:max_length], dtype=torch.float32)
+
+    return sorted_batch_ids, seq_tensor, lengths.values
+
+
+def run_inference(seq_tensor, sequence_lengths, num_classes):
+    outputs = model.forward(
+        x=seq_tensor,
+        sequence_lengths=sequence_lengths,
+        max_sequence_length=max_length
+    )
     _, index = torch.max(f.softmax(outputs, dim=1), 1)
 
     y_hat = np.zeros((len(index), num_classes), dtype=int)
@@ -80,10 +118,37 @@ def run_inference(seq_tensor, num_classes):
 
 def run():
     meta_data = utils.load_meta_data(training=False)
+    output_columns = ["object_id"] + ["class_{label}".format(label=label) for label in one_hot_lookup.values()]
+    first_insert = True
+    num_objects_written = 0
+
     for batch in stream_test_set():
         data = pd.DataFrame(batch)
         data = pre_process(data, meta_data)
 
+        data[feature_columns] = (data[feature_columns] - mean) / variance
+        sorted_batch_ids, seq_tensor, seq_lengths = batch_generator(
+            data=data,
+            batch_ids=data.index.unique()
+        )
+        predicted_classes = run_inference(
+            seq_tensor=seq_tensor,
+            sequence_lengths=seq_lengths,
+            num_classes=len(class_lookup)
+        )
+        inference_output = np.hstack((sorted_batch_ids[:, None], predicted_classes))
+        output = pd.DataFrame(inference_output, columns=output_columns).sort_values("object_id")
+
+        if first_insert:
+            output.to_csv(root + "/output/submission.csv", index=False)
+            first_insert = False
+        else:
+            output.to_csv(root + "/output/submission.csv", mode="a", header=False, index=False)
+
+        num_objects_written += len(output)
+        print(num_objects_written, "written to submission output")
+
 
 if __name__ == '__main__':
+    USE_GPU = False
     run()
