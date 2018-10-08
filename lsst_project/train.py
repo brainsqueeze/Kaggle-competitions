@@ -65,15 +65,20 @@ def batch_generator(data, batch_ids, max_length, columns, one_hot_lookup):
 
     target = group.target.unique()[sorted_batch_ids].astype(float).values
     target = utils.encode_targets(target_array=target, col_lookup=one_hot_lookup)
+    target = torch.tensor(target, dtype=torch.long)
 
     seq_tensor = torch.autograd.Variable(torch.zeros((len(sorted_batch_ids), max_length, len(columns)))).float()
+    if USE_GPU:
+        seq_tensor = seq_tensor.cuda()
+        target = target.cuda()
+
     for i in range(len(sorted_batch_ids)):
         object_id = sorted_batch_ids[i]
         seq_len = lengths[object_id]
         seq = data[data.index == object_id][columns].values
         seq_tensor[i, :seq_len] = torch.tensor(seq, dtype=torch.float32)
 
-    return seq_tensor, torch.tensor(target, dtype=torch.long), lengths.values
+    return seq_tensor, target, lengths.values
 
 
 def compute_f1(predictions, expectations, num_classes):
@@ -99,7 +104,7 @@ def compute_f1(predictions, expectations, num_classes):
         return f1, (precision, recall)
 
 
-def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
+def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., conv_dropout=0.,
         num_epochs=2, batch_size=32, num_batches=50):
     log("Loading data")
     meta = utils.load_meta_data(training=True)
@@ -145,7 +150,8 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
             lstm_dim=hidden_dims,
             num_lstm_layers=num_hidden_layers,
             lstm_dropout=lstm_dropout,
-            dense_dropout=dense_dropout
+            dense_dropout=dense_dropout,
+            conv_dropout=conv_dropout
         )
 
         json.dump(d, jf, indent=2)
@@ -157,10 +163,15 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
         lstm_dim=hidden_dims,
         num_lstm_layers=num_hidden_layers,
         lstm_dropout=lstm_dropout,
-        dense_dropout=dense_dropout
+        dense_dropout=dense_dropout,
+        conv_dropout=conv_dropout
     )
+
+    if USE_GPU:
+        model = model.cuda()
+
     loss = torch.nn.CrossEntropyLoss()
-    opt = torch.optim.Adam(model.parameters(), lr=1e-2)
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-3)
 
     summary_writer_train = tf.summary.FileWriter(config.MODEL_PATH + 'training')
     summary_writer_dev = tf.summary.FileWriter(config.MODEL_PATH + 'validation')
@@ -235,11 +246,14 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
 
 
 if __name__ == '__main__':
+    USE_GPU = True
+
     run(
-        hidden_dims=32,
+        hidden_dims=16,
         num_hidden_layers=2,
         lstm_dropout=0.3,
         dense_dropout=0.2,
+        conv_dropout=0.5,
         num_epochs=10000,
         batch_size=64,
         num_batches=100

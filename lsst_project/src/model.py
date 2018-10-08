@@ -4,11 +4,17 @@ import torch.nn as nn
 
 class Classifier(nn.Module):
 
-    def __init__(self, num_features, num_classes, max_sequence_length,
-                 lstm_dim=64, num_lstm_layers=1, lstm_dropout=0., dense_dropout=0.):
+    def __init__(self, num_features, num_classes, max_sequence_length, lstm_dim=64, num_lstm_layers=1,
+                 lstm_dropout=0., dense_dropout=0., conv_dropout=0.):
         super(Classifier, self).__init__()
         conv_1_output_dim = lstm_dim // 2
         conv_2_output_dim = conv_1_output_dim // 2
+
+        # the minus - 2 is for dimensional losses during convolutional sweeps
+        flat_dims = conv_2_output_dim * (max_sequence_length - 2)
+
+        self.flat = flat_dims
+        self.max_len = max_sequence_length
 
         self.lstm = nn.LSTM(
             input_size=num_features,
@@ -39,18 +45,16 @@ class Classifier(nn.Module):
             bias=False
         )
 
-        # the minus - 2 is for dimensional losses during convolutional sweeps
-        flat_dims = conv_2_output_dim * (max_sequence_length - 2)
-
-        self.flat = flat_dims
-        self.max_len = max_sequence_length
         self.conv1_dim = conv_1_output_dim
         self.conv2_dim = conv_2_output_dim
 
+        self.input_dropout = nn.Dropout(p=dense_dropout)
         self.dense_dropout = nn.Dropout(p=dense_dropout)
+        self.conv_dropout = nn.Dropout(p=conv_dropout)
         self.dense = nn.Linear(in_features=flat_dims, out_features=num_classes)
 
     def forward(self, x, sequence_lengths, max_sequence_length):
+        x = self.input_dropout(x)
         packed = nn.utils.rnn.pack_padded_sequence(x, lengths=sequence_lengths, batch_first=True)
 
         # ht is the hidden state for time-step = sequence length
@@ -60,7 +64,8 @@ class Classifier(nn.Module):
 
         output = output.transpose(1, 2)  # need to swap inputs and sequences for CNN layers
         x = self.conv_1(output)
-        x = func.relu(self.batch_norm(x))
+        x = self.batch_norm(x)
+        x = func.relu(self.conv_dropout(x))
         x = func.relu(self.conv_2(x))
 
         # transpose back to the original shape
