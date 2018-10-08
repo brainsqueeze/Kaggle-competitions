@@ -31,13 +31,13 @@ def scale_data(data, columns):
     features = data[columns]
     mean, variance = features.mean(), features.std()
 
-    # m_dict, v_dict = mean.to_dict(), variance.to_dict()
+    m_dict, v_dict = mean.to_dict(), variance.to_dict()
     # todo store this lookup for retrieval at inference time
-    # lookup = {col: {"mean": avg, "variance": var} for (col, avg), (_, var) in zip(m_dict.items(), v_dict.items())}
+    lookup = {col: {"mean": avg, "variance": var} for (col, avg), (_, var) in zip(m_dict.items(), v_dict.items())}
 
     data[columns] -= mean
     data[columns] /= variance
-    return data, (mean, variance)
+    return data, (mean, variance), lookup
 
 
 def split_train_val_sets(object_ids, val_size=512):
@@ -128,7 +128,7 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
     feature_columns = [col for col in data.columns if col not in columns_to_exclude]
 
     log("Scaling data")
-    data, (mean, variance) = scale_data(data=data, columns=feature_columns)
+    data, (mean, variance), stats_lookup = scale_data(data=data, columns=feature_columns)
     data_cv[feature_columns] = (data_cv[feature_columns] - mean) / variance
 
     max_length = lengths.max()
@@ -148,6 +148,16 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
             dense_dropout=dense_dropout
         )
 
+        json.dump(d, jf, indent=2)
+
+    with open(config.MODEL_PATH + "data.json", "w") as jf:
+        d = {
+            "classes": class_lookup,
+            "stats": {
+                "mean": {k: float(v["mean"]) for k, v in stats_lookup.items()},
+                "variance": {k: float(v["variance"]) for k, v in stats_lookup.items()}
+            }
+        }
         json.dump(d, jf, indent=2)
 
     model = Classifier(
