@@ -188,12 +188,21 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
     summary_writer_train = tf.summary.FileWriter(config.MODEL_PATH + 'training')
     summary_writer_dev = tf.summary.FileWriter(config.MODEL_PATH + 'validation')
 
+    loss_diff = 0
+    num_sequential_epochs_growing_diff = 0
+
     for epoch in range(num_epochs):
 
         log("\tEpoch: {epoch}".format(epoch=epoch + 1))
-        running_loss = 0
+        running_loss, total_batch_loss, count = 0, 0, 0
         train_summary = tf.Summary()
         i = 0
+
+        if num_sequential_epochs_growing_diff > 5 or loss_diff > 1:
+            log("Early stopping due to {num_seq_epochs} sequential epochs where the "
+                "CV-loss is growing relative to the "
+                "training loss".format(num_seq_epochs=num_sequential_epochs_growing_diff))
+            break
 
         for batch_ids in shuffle_sample(train_ids, batch_size, num_batches, seed=0):
             seq_tensor, target, train_lengths = batch_generator(
@@ -219,6 +228,9 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
 
             train_cost = cost.item()
             running_loss += train_cost
+            total_batch_loss += running_loss
+            count += 1
+
             train_summary.value.add(tag="cost", simple_value=train_cost)
             summary_writer_train.add_summary(train_summary, epoch * num_batches + i)
 
@@ -255,6 +267,14 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
         print("\tcross-validation class-averaged F1: {f1}".format(f1=f1.mean()))
 
         torch.save(model.state_dict(), config.MODEL_PATH + "model.pth")
+
+        avg_batch_loss = total_batch_loss / count
+        diff = abs(avg_batch_loss - cv_cost) / avg_batch_loss
+        if diff >= loss_diff:
+            loss_diff = diff
+            num_sequential_epochs_growing_diff += 1
+        else:
+            num_sequential_epochs_growing_diff = 0
 
 
 if __name__ == '__main__':
