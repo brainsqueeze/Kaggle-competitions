@@ -18,15 +18,6 @@ def log(message):
     print(m)
 
 
-def pre_process(data, meta_data):
-    assert isinstance(data, pd.DataFrame)
-    data["unix_time"] = utils.mjd_to_unix_time(data.mjd)
-    data = data.set_index('object_id').join(meta_data.set_index('object_id'))
-
-    data["distmod"].fillna(0, inplace=True)
-    return data
-
-
 def scale_data(data, columns):
     features = data[columns]
     mean, variance = features.mean(), features.std()
@@ -107,7 +98,7 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
     log("Loading data")
     meta = utils.load_meta_data(training=True)
     data = utils.load_data(training=True)
-    data = pre_process(data=data, meta_data=meta)
+    data = utils.pre_process(data=data, meta_data=meta)
 
     log("Splitting training and cross-validation sets")
     val_ids, train_ids = split_train_val_sets(object_ids=meta.object_id.values)
@@ -125,7 +116,8 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
         "mjd",
         "unix_time",
         "detected",
-        "hostgal_photoz",
+        # "hostgal_photoz",
+        "hostgal_specz",
         "target"
     }
     feature_columns = [col for col in data.columns if col not in columns_to_exclude]

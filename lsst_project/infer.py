@@ -13,13 +13,17 @@ import os
 
 from lsst_project.data import config
 
-BATCH_SIZE = 512
+BATCH_SIZE = 512 * 2
+USE_GPU = True
 root = os.path.dirname(os.path.abspath(__file__))
+
 model_state = torch.load(config.MODEL_PATH + "model.pth")
 with open(config.MODEL_PATH + "model.json", "r") as jf:
     params = json.load(jf)
 model = Classifier(**params)
 model.load_state_dict(model_state)
+if USE_GPU:
+    model = model.cuda()
 
 with open(config.MODEL_PATH + "data.json", "r") as jf:
     d = json.load(jf)
@@ -72,15 +76,6 @@ def stream_test_set():
             yield objects
 
 
-def pre_process(data, meta_data):
-    assert isinstance(data, pd.DataFrame)
-    data["unix_time"] = utils.mjd_to_unix_time(data.mjd)
-    data = data.set_index('object_id').join(meta_data.set_index('object_id'))
-
-    data["distmod"].fillna(0, inplace=True)
-    return data
-
-
 def batch_generator(data, batch_ids):
     data = data[data.index.isin(batch_ids)]
 
@@ -96,7 +91,7 @@ def batch_generator(data, batch_ids):
             max_sequence_length=max_length
         ) for object_id in sorted_batch_ids
     ])
-    seq_tensor = torch.tensor(x, dtype=torch.float32)
+    seq_tensor = torch.tensor(x, dtype=torch.float32, requires_grad=False)
 
     if USE_GPU:
         seq_tensor = seq_tensor.cuda()
@@ -125,7 +120,7 @@ def run():
 
     for batch in stream_test_set():
         data = pd.DataFrame(batch)
-        data = pre_process(data, meta_data)
+        data = utils.pre_process(data, meta_data)
 
         data[feature_columns] = (data[feature_columns] - mean) / variance
         sorted_batch_ids, seq_tensor, seq_lengths = batch_generator(
@@ -151,5 +146,4 @@ def run():
 
 
 if __name__ == '__main__':
-    USE_GPU = True
     run()

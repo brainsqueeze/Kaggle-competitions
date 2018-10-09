@@ -27,6 +27,20 @@ def load_meta_data(training=True):
     return pd.read_csv(path)
 
 
+def pre_process(data, meta_data):
+    assert isinstance(data, pd.DataFrame)
+    data["unix_time"] = mjd_to_unix_time(data.mjd)
+    data["flux_upper"] = data["flux"] * (1 + data["flux_err"] / 100.)
+    data["flux_lower"] = data["flux"] * (1 - data["flux_err"] / 100.)
+    data = data.set_index('object_id').join(meta_data.set_index('object_id'))
+
+    data["hostgal_photoz_upper"] = data["hostgal_photoz"] * (1 + data["hostgal_photoz_err"] / 100.)
+    data["hostgal_photoz_lower"] = data["hostgal_photoz"] * (1 - data["hostgal_photoz_err"] / 100.)
+
+    data["distmod"].fillna(0, inplace=True)
+    return data
+
+
 def encode_targets(target_array, col_lookup):
     assert isinstance(target_array, np.ndarray)
     assert isinstance(col_lookup, dict)
