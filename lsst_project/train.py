@@ -65,18 +65,16 @@ def batch_generator(data, batch_ids, max_length, columns, one_hot_lookup):
 
     target = group.target.unique()[sorted_batch_ids].astype(float).values
     target = utils.encode_targets(target_array=target, col_lookup=one_hot_lookup)
-    target = torch.tensor(target, dtype=torch.long)
+    target = torch.tensor(target, dtype=torch.long, requires_grad=False)
 
-    seq_tensor = torch.autograd.Variable(torch.zeros((len(sorted_batch_ids), max_length, len(columns)))).float()
+    x = np.array([
+        utils.pad_sequence(sequence=data[data.index == object_id][columns].values, max_sequence_length=max_length)
+        for object_id in sorted_batch_ids
+    ])
+    seq_tensor = torch.tensor(x, dtype=torch.float32, requires_grad=True)
     if USE_GPU:
         seq_tensor = seq_tensor.cuda()
         target = target.cuda()
-
-    for i in range(len(sorted_batch_ids)):
-        object_id = sorted_batch_ids[i]
-        seq_len = lengths[object_id]
-        seq = data[data.index == object_id][columns].values
-        seq_tensor[i, :seq_len] = torch.tensor(seq, dtype=torch.float32)
 
     return seq_tensor, target, lengths.values
 
@@ -178,12 +176,12 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
         dense_dropout=dense_dropout,
         conv_dropout=conv_dropout
     )
+    loss = torch.nn.CrossEntropyLoss()
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-3)
 
     if USE_GPU:
         model = model.cuda()
-
-    loss = torch.nn.CrossEntropyLoss()
-    opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-3)
+        torch.backends.cudnn.benchmark = True
 
     summary_writer_train = tf.summary.FileWriter(config.MODEL_PATH + 'training')
     summary_writer_dev = tf.summary.FileWriter(config.MODEL_PATH + 'validation')
@@ -240,6 +238,7 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
             i += 1
 
         summary_writer_train.flush()
+
         # evaluate the cross-validation set
         seq_tensor, target, cv_lengths = batch_generator(
             data=data_cv,
@@ -278,7 +277,7 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
 
 
 if __name__ == '__main__':
-    USE_GPU = False
+    USE_GPU = True
 
     run(
         hidden_dims=16,

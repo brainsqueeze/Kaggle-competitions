@@ -73,6 +73,6 @@ class Classifier(nn.Module):
         x = x.transpose(1, 2)
 
         # flatten
-        x = x.contiguous().view(x.shape[0], -1)
+        x = x.reshape(x.shape[0], -1)
         x = self.dense_dropout(x)
         return self.dense(x)

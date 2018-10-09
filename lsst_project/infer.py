@@ -90,15 +90,16 @@ def batch_generator(data, batch_ids):
     lengths = group.size()[batch_ids].sort_values(ascending=False)
     sorted_batch_ids = lengths.index
 
-    seq_tensor = torch.autograd.Variable(torch.zeros((len(sorted_batch_ids), max_length, len(feature_columns)))).float()
+    x = np.array([
+        utils.pad_sequence(
+            sequence=data[data.index == object_id][feature_columns].values,
+            max_sequence_length=max_length
+        ) for object_id in sorted_batch_ids
+    ])
+    seq_tensor = torch.tensor(x, dtype=torch.float32)
+
     if USE_GPU:
         seq_tensor = seq_tensor.cuda()
-
-    for i in range(len(sorted_batch_ids)):
-        object_id = sorted_batch_ids[i]
-        seq_len = lengths[object_id]
-        seq = data[data.index == object_id][feature_columns].values
-        seq_tensor[i, :min(seq_len, max_length)] = torch.tensor(seq[:max_length], dtype=torch.float32)
 
     return sorted_batch_ids, seq_tensor, lengths.values
 
@@ -150,5 +151,5 @@ def run():
 
 
 if __name__ == '__main__':
-    USE_GPU = False
+    USE_GPU = True
     run()

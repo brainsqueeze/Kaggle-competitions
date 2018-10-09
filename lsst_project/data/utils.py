@@ -40,3 +40,19 @@ def one_hot_encode(target_array, col_lookup):
     targets = np.zeros((len(target_array), len(col_lookup)), dtype=np.float32)
     targets[np.arange(len(targets)), columns] = 1
     return targets
+
+
+def pad_sequence(sequence, max_sequence_length):
+    """
+    Pads individual text sequences to the maximum length
+    seen by the model at training time
+    :param sequence: list of integer lookup keys for the vocabulary (list)
+    :param max_sequence_length: (int)
+    :return: padded sequence (ndarray)
+    """
+
+    difference = max_sequence_length - sequence.shape[0]
+    if difference > 0:
+        pad = np.zeros((difference, sequence.shape[1]), dtype=np.float32)
+        return np.concatenate((sequence, pad))
+    return sequence[:max_sequence_length]
