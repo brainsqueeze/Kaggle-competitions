@@ -111,11 +111,12 @@ def run_inference(seq_tensor, sequence_lengths, num_classes):
         sequence_lengths=sequence_lengths,
         max_sequence_length=max_length
     )
-    _, index = torch.max(f.softmax(outputs, dim=1), 1)
+    # _, index = torch.max(f.softmax(outputs, dim=1), 1)
 
-    y_hat = np.zeros((len(index), num_classes), dtype=int)
-    y_hat[np.arange(y_hat.shape[0]), index] = 1
-    return y_hat
+    # y_hat = np.zeros((len(index), num_classes), dtype=int)
+    # y_hat[np.arange(y_hat.shape[0]), index] = 1
+    # return y_hat
+    return outputs.cpu().numpy().astype(np.float32)
 
 
 def run():
