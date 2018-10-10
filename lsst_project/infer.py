@@ -13,8 +13,8 @@ import os
 
 from lsst_project.data import config
 
-BATCH_SIZE = 512 * 2
-USE_GPU = True
+BATCH_SIZE = 512
+USE_GPU = False
 root = os.path.dirname(os.path.abspath(__file__))
 
 model_state = torch.load(config.MODEL_PATH + "model.pth")
@@ -24,6 +24,7 @@ model = Classifier(**params)
 model.load_state_dict(model_state)
 if USE_GPU:
     model = model.cuda()
+    BATCH_SIZE *= 2
 
 with open(config.MODEL_PATH + "data.json", "r") as jf:
     d = json.load(jf)
@@ -111,12 +112,9 @@ def run_inference(seq_tensor, sequence_lengths, num_classes):
         sequence_lengths=sequence_lengths,
         max_sequence_length=max_length
     )
-    # _, index = torch.max(f.softmax(outputs, dim=1), 1)
-
-    # y_hat = np.zeros((len(index), num_classes), dtype=int)
-    # y_hat[np.arange(y_hat.shape[0]), index] = 1
-    # return y_hat
-    return outputs.cpu().numpy().astype(np.float32)
+    y_hat = f.softmax(outputs, dim=1)
+    # need probability outputs
+    return y_hat.detach().cpu().numpy()
 
 
 def run():

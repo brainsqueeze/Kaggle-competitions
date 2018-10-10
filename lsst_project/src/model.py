@@ -1,4 +1,4 @@
-import torch.nn.functional as func
+import torch.nn.functional as f
 import torch.nn as nn
 
 
@@ -66,8 +66,8 @@ class Classifier(nn.Module):
         output = output.transpose(1, 2)  # need to swap inputs and sequences for CNN layers
         x = self.conv_1(output)
         x = self.batch_norm(x)
-        x = func.relu(self.conv_dropout(x))
-        x = func.relu(self.conv_2(x))
+        x = f.relu(self.conv_dropout(x))
+        x = f.relu(self.conv_2(x))
 
         # transpose back to the original shape
         x = x.transpose(1, 2)

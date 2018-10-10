@@ -3,7 +3,6 @@ from lsst_project.data import utils
 
 import json
 
-import pandas as pd
 import numpy as np
 import torch
 from torch.nn import functional as f
@@ -23,7 +22,6 @@ def scale_data(data, columns):
     mean, variance = features.mean(), features.std()
 
     m_dict, v_dict = mean.to_dict(), variance.to_dict()
-    # todo store this lookup for retrieval at inference time
     lookup = {col: {"mean": avg, "variance": var} for (col, avg), (_, var) in zip(m_dict.items(), v_dict.items())}
 
     data[columns] -= mean
@@ -269,7 +267,7 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
 
 
 if __name__ == '__main__':
-    USE_GPU = True
+    USE_GPU = False
 
     run(
         hidden_dims=16,
