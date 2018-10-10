@@ -53,22 +53,28 @@ def stream_test_set():
     with open(config.DATA_PATH + "test_set.csv", "r") as test_file:
         reader = csv.DictReader(test_file)
         for row in reader:
-            if num_objects % BATCH_SIZE != 0:
-                row = {k: number_caster(row[k]) for k in row}
-                object_id = row["object_id"]
+            row = {k: number_caster(row[k]) for k in row}
+            object_id = row["object_id"]
+
+            if num_objects != BATCH_SIZE:
 
                 if previous_object_id is None:
                     previous_object_id = object_id
                     objects.append(row)
                 elif previous_object_id == object_id:
                     objects.append(row)
+                elif previous_object_id != object_id and num_objects == BATCH_SIZE:
+                    objects_to_return = objects[:]
+                    objects = [row]
+                    num_objects = 1
+                    yield objects_to_return
                 else:
                     previous_object_id = object_id
                     num_objects += 1
                     objects.append(row)
             else:
                 objects_to_return = objects[:]
-                objects = []
+                objects = [row]
                 num_objects = 1
                 yield objects_to_return
 
@@ -145,5 +151,13 @@ def run():
         print(num_objects_written, "written to submission output")
 
 
+def deduplicate():
+    data = pd.read_csv(root + "/output/submission.csv")
+    data = data.drop_duplicates(subset="object_id", keep="first")
+    data.to_csv(root + "/output/submission_dedupe.csv", index=False)
+    return
+
+
 if __name__ == '__main__':
     run()
+    deduplicate()
