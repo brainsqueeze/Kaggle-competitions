@@ -53,32 +53,25 @@ def stream_test_set():
 
     with open(config.DATA_PATH + "test_set.csv", "r") as test_file:
         reader = csv.DictReader(test_file)
+
         for row in reader:
             row = {k: number_caster(row[k]) for k in row}
             object_id = row["object_id"]
 
-            if num_objects != BATCH_SIZE:
+            if previous_object_id is None:
+                previous_object_id = object_id
+            elif object_id != previous_object_id:
+                previous_object_id = object_id
+                num_objects += 1
 
-                if previous_object_id is None:
-                    previous_object_id = object_id
-                    objects.append(row)
-                elif previous_object_id == object_id:
-                    objects.append(row)
-                elif previous_object_id != object_id and num_objects == BATCH_SIZE:
-                    objects_to_return = objects[:]
-                    objects = [row]
-                    num_objects = 1
-                    yield objects_to_return
-                else:
-                    previous_object_id = object_id
-                    num_objects += 1
-                    objects.append(row)
-            else:
+            # one over the batch size limit
+            if num_objects == BATCH_SIZE + 1:
                 objects_to_return = objects[:]
                 objects = [row]
                 num_objects = 1
                 yield objects_to_return
-
+            else:
+                objects.append(row)
         if len(objects) > 0:
             yield objects
 
@@ -106,7 +99,7 @@ def batch_generator(data, batch_ids):
     return sorted_batch_ids, seq_tensor, lengths.values
 
 
-def run_inference(seq_tensor, sequence_lengths, num_classes):
+def run_inference(seq_tensor, sequence_lengths):
     outputs = model.forward(
         x=seq_tensor,
         sequence_lengths=sequence_lengths,
@@ -114,7 +107,7 @@ def run_inference(seq_tensor, sequence_lengths, num_classes):
     )
     y_hat = f.softmax(outputs, dim=1)
     # need probability outputs
-    return y_hat.detach().cpu().numpy()
+    return y_hat.detach().cpu().numpy().astype(np.float32)
 
 
 def run():
@@ -122,10 +115,14 @@ def run():
     output_columns = ["object_id"] + ["class_{label}".format(label=label) for label in one_hot_lookup.values()]
     first_insert = True
     num_objects_written = 0
+    output = None
 
     for batch in stream_test_set():
         data = pd.DataFrame(batch)
         data = utils.pre_process(data, meta_data)
+
+        if isinstance(output, pd.DataFrame):
+            assert ~data.index.isin(output.object_id).all()
 
         data[feature_columns] = (data[feature_columns] - mean) / variance
         sorted_batch_ids, seq_tensor, seq_lengths = batch_generator(
@@ -134,11 +131,11 @@ def run():
         )
         predicted_classes = run_inference(
             seq_tensor=seq_tensor,
-            sequence_lengths=seq_lengths,
-            num_classes=len(class_lookup)
+            sequence_lengths=seq_lengths
         )
         inference_output = np.hstack((sorted_batch_ids[:, None], predicted_classes))
         output = pd.DataFrame(inference_output, columns=output_columns).sort_values("object_id")
+        output.object_id = output.object_id.astype(int)
 
         if first_insert:
             output.to_csv(root + "/output/submission.csv", index=False)
@@ -159,4 +156,4 @@ def deduplicate():
 
 if __name__ == '__main__':
     run()
-    deduplicate()
+    # deduplicate()
