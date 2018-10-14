@@ -1,12 +1,11 @@
-from lsst_project.src.model import LstmCnnClassifier
+from lsst_project.src.model import SvmClassifier
+from lsst_project.src.nn_math import SvmProbsLoss
 from lsst_project.data import utils
 
 import json
 
 import numpy as np
 import torch
-from torch.nn import functional as f
-
 import tensorflow as tf
 
 from lsst_project.data import config
@@ -53,7 +52,8 @@ def batch_generator(data, batch_ids, max_length, columns, one_hot_lookup):
     sorted_batch_ids = lengths.index
 
     target = group.target.unique()[sorted_batch_ids].astype(float).values
-    target = utils.encode_targets(target_array=target, col_lookup=one_hot_lookup)
+    # target = utils.encode_targets(target_array=target, col_lookup=one_hot_lookup)
+    target = utils.one_hot_encode(target_array=target, col_lookup=one_hot_lookup)
     target = torch.tensor(target, dtype=torch.long, requires_grad=False)
 
     x = np.array([
@@ -69,29 +69,28 @@ def batch_generator(data, batch_ids, max_length, columns, one_hot_lookup):
 
 
 def compute_f1(predictions, expectations, num_classes):
-    y = np.zeros((len(expectations), num_classes), dtype=np.float32)
+    max_args = expectations.argmax(axis=1)
     y_hat = np.zeros((len(predictions), num_classes), dtype=np.float32)
-
-    y[np.arange(y.shape[0]), expectations] = 1
-    y_hat[np.arange(y_hat.shape[0]), predictions] = 1
+    y_hat[np.arange(max_args.shape[0]), max_args] = 1
+    expectations = expectations.astype(np.float32)
 
     with np.errstate(divide='ignore', invalid='ignore'):
-        tp = np.sum(y_hat * y, axis=0)
-        fp = np.sum(y_hat * (1 - y), axis=0)
-        fn = np.sum((1 - y_hat) * y, axis=0)
+        tp = np.sum(y_hat * expectations, axis=0)
+        fp = np.sum(y_hat * (1 - expectations), axis=0)
+        fn = np.sum((1 - y_hat) * expectations, axis=0)
 
         precision = tp / (tp + fp)
         recall = tp / (tp + fn)
 
-        precision[np.isnan(precision)] = 0
-        recall[np.isnan(recall)] = 0
+        precision[np.isnan(precision)] = 1
+        recall[np.isnan(recall)] = 1
 
         f1 = 2 * precision * recall / (precision + recall)
         f1[np.isnan(f1)] = 0
         return f1, (precision, recall)
 
 
-def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., conv_dropout=0.,
+def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
         num_epochs=2, batch_size=32, num_batches=50):
     log("Loading data")
     meta = utils.load_meta_data(training=True)
@@ -102,6 +101,11 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
     val_ids, train_ids = split_train_val_sets(object_ids=meta.object_id.values)
     data_cv = data[data.index.isin(val_ids)]
     data = data[data.index.isin(train_ids)]
+
+    log("Getting test set")
+    test_meta = utils.load_meta_data(training=False)
+    test_data = utils.load_data(training=False)
+    test_data = utils.pre_process(data=test_data, meta_data=test_meta)
 
     print("\tTraining with {size} examples".format(size=len(train_ids)))
 
@@ -130,6 +134,14 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
     one_hot_lookup = {v: idx for idx, v in enumerate(classes)}
     class_lookup = {v: k for k, v in one_hot_lookup.items()}
 
+    cv_seq_tensor, cv_target, cv_lengths = batch_generator(
+        data=data_cv,
+        batch_ids=val_ids,
+        max_length=max_length,
+        columns=feature_columns,
+        one_hot_lookup=one_hot_lookup
+    )
+
     with open(config.MODEL_PATH + "model.json", "w") as jf:
         d = dict(
             num_features=len(feature_columns),
@@ -138,8 +150,7 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
             lstm_dim=hidden_dims,
             num_lstm_layers=num_hidden_layers,
             lstm_dropout=lstm_dropout,
-            dense_dropout=dense_dropout,
-            conv_dropout=conv_dropout
+            dense_dropout=dense_dropout
         )
 
         json.dump(d, jf, indent=2)
@@ -156,17 +167,16 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
         }
         json.dump(d, jf, indent=2)
 
-    model = LstmCnnClassifier(
+    model = SvmClassifier(
         num_features=len(feature_columns),
         num_classes=num_targets,
-        max_sequence_length=max_length,
         lstm_dim=hidden_dims,
         num_lstm_layers=num_hidden_layers,
         lstm_dropout=lstm_dropout,
-        dense_dropout=dense_dropout,
-        conv_dropout=conv_dropout
+        dense_dropout=dense_dropout
     )
-    loss = torch.nn.CrossEntropyLoss()
+    # loss = torch.nn.CrossEntropyLoss()
+    loss = SvmProbsLoss()
     opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-3)
 
     if USE_GPU:
@@ -205,12 +215,12 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
                 continue
 
             opt.zero_grad()
-            outputs = model.forward(
+            outputs, logits = model.forward(
                 x=seq_tensor,
                 sequence_lengths=train_lengths,
                 max_sequence_length=max_length
             )
-            cost = loss(outputs, target)
+            cost = loss(outputs, logits, target, multi_label=False)
             cost.backward()
             opt.step()
 
@@ -230,21 +240,18 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
         summary_writer_train.flush()
 
         # evaluate the cross-validation set
-        seq_tensor, target, cv_lengths = batch_generator(
-            data=data_cv,
-            batch_ids=val_ids,
-            max_length=max_length,
-            columns=feature_columns,
-            one_hot_lookup=one_hot_lookup
-        )
-        outputs = model.forward(
-            x=seq_tensor,
+        outputs, logits = model.forward(
+            x=cv_seq_tensor,
             sequence_lengths=cv_lengths,
             max_sequence_length=max_length
         )
-        _, index = torch.max(f.softmax(outputs, dim=1), 1)
-        cv_cost = loss(outputs, target)
-        f1, _ = compute_f1(predictions=index, expectations=target, num_classes=num_targets)
+        prediction = torch.softmax(logits, dim=-1)
+        cv_cost = loss(outputs, logits, cv_target, multi_label=False)
+        f1, _ = compute_f1(
+            predictions=prediction.detach().cpu().numpy(),
+            expectations=cv_target.cpu().numpy(),
+            num_classes=num_targets
+        )
 
         dev_summary = tf.Summary()
         dev_summary.value.add(tag="cost", simple_value=cv_cost)
@@ -267,14 +274,13 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0., 
 
 
 if __name__ == '__main__':
-    USE_GPU = False
+    USE_GPU = torch.cuda.is_available()
 
     run(
         hidden_dims=16,
         num_hidden_layers=2,
         lstm_dropout=0.3,
         dense_dropout=0.2,
-        conv_dropout=0.5,
         num_epochs=10000,
         batch_size=64,
         num_batches=100

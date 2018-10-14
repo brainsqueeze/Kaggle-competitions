@@ -2,7 +2,7 @@ from torch.nn import functional as f
 import torch
 import numpy as np
 
-from lsst_project.src.model import Classifier
+from lsst_project.src.model import LstmCnnClassifier
 
 from lsst_project.data import utils
 
@@ -14,13 +14,13 @@ import os
 from lsst_project.data import config
 
 BATCH_SIZE = 512
-USE_GPU = False
+USE_GPU = True
 root = os.path.dirname(os.path.abspath(__file__))
 
 model_state = torch.load(config.MODEL_PATH + "model.pth")
 with open(config.MODEL_PATH + "model.json", "r") as jf:
     params = json.load(jf)
-model = Classifier(**params)
+model = LstmCnnClassifier(**params)
 model.load_state_dict(model_state)
 if USE_GPU:
     model = model.cuda()
