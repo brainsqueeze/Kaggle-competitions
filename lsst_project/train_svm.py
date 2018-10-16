@@ -1,5 +1,5 @@
 from lsst_project.src.model import SvmClassifier
-from lsst_project.src.nn_math import SvmProbsLoss
+from lsst_project.src import optimizers
 from lsst_project.data import utils
 
 import json
@@ -102,11 +102,6 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
     data_cv = data[data.index.isin(val_ids)]
     data = data[data.index.isin(train_ids)]
 
-    log("Getting test set")
-    test_meta = utils.load_meta_data(training=False)
-    test_data = utils.load_data(training=False)
-    test_data = utils.pre_process(data=test_data, meta_data=test_meta)
-
     print("\tTraining with {size} examples".format(size=len(train_ids)))
 
     log("Getting longest sequence for padding information")
@@ -175,8 +170,8 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
         lstm_dropout=lstm_dropout,
         dense_dropout=dense_dropout
     )
-    # loss = torch.nn.CrossEntropyLoss()
-    loss = SvmProbsLoss()
+    svm_loss = optimizers.SvmLoss()
+    prob_loss = optimizers.LogisticLoss()
     opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-3)
 
     if USE_GPU:
@@ -192,7 +187,7 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
     for epoch in range(num_epochs):
 
         log("\tEpoch: {epoch}".format(epoch=epoch + 1))
-        running_loss, total_batch_loss, count = 0, 0, 0
+        running_svm_loss, running_prob_loss, total_batch_loss, count = 0, 0, 0, 0
         train_summary = tf.Summary()
         i = 0
 
@@ -220,21 +215,32 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
                 sequence_lengths=train_lengths,
                 max_sequence_length=max_length
             )
-            cost = loss(outputs, logits, target, multi_label=False)
-            cost.backward()
+
+            svm_cost = svm_loss.forward(decisions=outputs, targets=target)
+            svm_cost.backward(retain_graph=True)
             opt.step()
 
-            train_cost = cost.item()
-            running_loss += train_cost
-            total_batch_loss += running_loss
+            prob_cost = prob_loss.forward(logits=logits, targets=target, multi_label=False)
+            prob_cost.backward()
+            opt.step()
+
+            train_cost_svm = svm_cost.item()
+            train_cost_prob = prob_cost.item()
+
+            running_svm_loss += train_cost_svm
+            running_prob_loss += train_cost_prob
             count += 1
 
-            train_summary.value.add(tag="cost", simple_value=train_cost)
+            train_summary.value.add(tag="cost/svm", simple_value=train_cost_svm)
+            train_summary.value.add(tag="cost/probabilities", simple_value=train_cost_prob)
             summary_writer_train.add_summary(train_summary, epoch * num_batches + i)
 
             if (i + 1) % 10 == 0:
-                print("\t\tloss: {loss}".format(loss=running_loss / 10))
-                running_loss = 0
+                print("\t\tSVM loss: {svm_loss} | log-loss: {prob_loss}".format(
+                    svm_loss=running_svm_loss / 10,
+                    prob_loss=running_prob_loss / 10
+                ))
+                running_svm_loss, running_prob_loss = 0, 0
             i += 1
 
         summary_writer_train.flush()
@@ -246,7 +252,8 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
             max_sequence_length=max_length
         )
         prediction = torch.softmax(logits, dim=-1)
-        cv_cost = loss(outputs, logits, cv_target, multi_label=False)
+        cv_cost_svm = svm_loss(outputs, cv_target)
+        cv_cost_prob = prob_loss(logits, cv_target, multi_label=False)
         f1, _ = compute_f1(
             predictions=prediction.detach().cpu().numpy(),
             expectations=cv_target.cpu().numpy(),
@@ -254,7 +261,8 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
         )
 
         dev_summary = tf.Summary()
-        dev_summary.value.add(tag="cost", simple_value=cv_cost)
+        dev_summary.value.add(tag="cost/svm", simple_value=cv_cost_svm)
+        dev_summary.value.add(tag="cost/probabilities", simple_value=cv_cost_prob)
         for i in range(len(f1)):
             dev_summary.value.add(tag="F1-score/class-{label}".format(label=class_lookup[i]), simple_value=f1[i])
 
@@ -264,13 +272,13 @@ def run(hidden_dims=32, num_hidden_layers=1, lstm_dropout=0., dense_dropout=0.,
 
         torch.save(model.state_dict(), config.MODEL_PATH + "model.pth")
 
-        avg_batch_loss = total_batch_loss / count
-        diff = abs(avg_batch_loss - cv_cost) / avg_batch_loss
-        if diff >= loss_diff:
-            loss_diff = diff
-            num_sequential_epochs_growing_diff += 1
-        else:
-            num_sequential_epochs_growing_diff = 0
+        # avg_batch_loss = total_batch_loss / count
+        # diff = abs(avg_batch_loss - cv_cost) / avg_batch_loss
+        # if diff >= loss_diff:
+        #     loss_diff = diff
+        #     num_sequential_epochs_growing_diff += 1
+        # else:
+        #     num_sequential_epochs_growing_diff = 0
 
 
 if __name__ == '__main__':
