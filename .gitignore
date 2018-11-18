@@ -61,5 +61,5 @@ target/
 /.vscode
 
 # data
-**/data/config*
+config*
 *.csv
