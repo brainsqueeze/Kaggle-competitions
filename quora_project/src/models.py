@@ -200,7 +200,8 @@ class AttentionSVM(object):
     def __cost(self):
         with tf.variable_scope('linear_svm_loss'):
             projection_dist = 1 - self.target * self.__output
-            loss = tf.reduce_mean(tf.nn.relu(projection_dist))
+            margin = tf.nn.relu(projection_dist)
+            loss = tf.reduce_mean(margin ** 2)
 
         with tf.variable_scope('l2_loss'):
             weights = tf.trainable_variables()

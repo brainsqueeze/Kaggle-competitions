@@ -1,7 +1,9 @@
 import tensorflow as tf
 import numpy as np
 from quora_project.src.models import AttentionSVM
+
 from quora_project.src.dictionary import EmbeddingLookup
+from quora_project.src import data_utils as utils
 
 from quora_project import config
 
@@ -15,9 +17,11 @@ def log(message):
     print(f"[INFO] {message}")
 
 
-def load_text():
+def load_text(infer=False):
     path = config.DATA_PATH
-    files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+    files = ["train.csv"]
+    if infer:
+        files = ["test.csv"]
     ids, texts, targets = [], [], []
 
     for file in files:
@@ -25,7 +29,7 @@ def load_text():
             reader = csv.DictReader(csv_f)
             for row in reader:
                 ids.append(row["qid"])
-                texts.append(row["question_text"])
+                texts.append(utils.pre_process(row["question_text"]))
                 targets.append(int(row["target"]))
 
     return np.array(ids), np.array(texts), np.array(targets, np.float32)
@@ -138,7 +142,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
     corpus = load_text()
 
     log("Sub-sampling to balance classes")
-    corpus = sub_sample(data=corpus, split_type="balanced")
+    corpus = sub_sample(data=corpus, split_type="skew", skew=2)
 
     log("Splitting the training and validation sets")
     train_data, cv_data = test_val_split(corpus=corpus, val_size=512)
@@ -239,13 +243,14 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
         embedding_conf.metadata_path = log_dir + "/metadata.tsv"
         tf.contrib.tensorboard.plugins.projector.visualize_embeddings(summary_writer_train, config_)
 
-        model.assign_lr(sess, 0.01)
+        model.assign_lr(sess, 0.5)
         model.assign_clip_norm(sess, 10.0)
 
         for epoch in range(num_epochs):
             print("\t Epoch: {0}".format(epoch + 1))
             train_summary = tf.Summary()
             i = 1
+            train_predictions, train_labels = [], []
 
             for x, y in mini_batches(
                     (full_text, t_targets),
@@ -257,14 +262,16 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
                 if x.shape[0] == 0:
                     continue
 
-                loss_val, gradient, _ = sess.run(
-                    [model.loss, model.gradient_norm, model.train],
+                loss_val, gradient, predictions, _ = sess.run(
+                    [model.loss, model.gradient_norm, model.predict, model.train],
                     feed_dict={
                         seq_input: x,
                         target_input: y,
                         keep_prob: keep_probabilities
                     }
                 )
+                train_predictions.append(predictions)
+                train_labels.append(y)
 
                 train_summary.value.add(tag="cost", simple_value=loss_val)
                 train_summary.value.add(tag="gradient_norm", simple_value=gradient)
@@ -273,6 +280,12 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
                 if i % (num_batches // 10) == 0:
                     print("\t\t iteration {0} - loss: {1}".format(i, loss_val))
                 i += 1
+
+            train_predictions = np.concatenate(train_predictions)
+            train_labels = np.concatenate(train_labels)
+            f1_score = f1(predicted=train_predictions, expected=train_labels)
+            train_summary.value.add(tag="f1-score", simple_value=f1_score)
+            summary_writer_train.add_summary(train_summary, epoch * num_batches + i)
             summary_writer_train.flush()
 
             dev_summary = tf.Summary()
@@ -281,6 +294,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
                 feed_dict={seq_input: cv_x, target_input: cv_targets, keep_prob: keep_probabilities}
             )
             f1_score = f1(predicted=predictions, expected=cv_targets)
+            log(f"Cross-validation F1-score: {f1_score}")
             dev_summary.value.add(tag="cost", simple_value=cv_loss)
             dev_summary.value.add(tag="f1-score", simple_value=f1_score)
             summary_writer_dev.add_summary(dev_summary, epoch * num_batches + i)
@@ -299,7 +313,7 @@ if __name__ == '__main__':
         num_tokens=20000,
         num_hidden=256,
         attention_size=128,
-        batch_size=32,
+        batch_size=64,
         num_batches=50,
         num_epochs=100,
         use_tf_idf=False
