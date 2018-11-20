@@ -142,7 +142,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
     corpus = load_text()
 
     log("Sub-sampling to balance classes")
-    corpus = sub_sample(data=corpus, split_type="skew", skew=2)
+    corpus = sub_sample(data=corpus, split_type="skew", skew=3)
 
     log("Splitting the training and validation sets")
     train_data, cv_data = test_val_split(corpus=corpus, val_size=512)
@@ -264,11 +264,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
 
                 loss_val, gradient, predictions, _ = sess.run(
                     [model.loss, model.gradient_norm, model.predict, model.train],
-                    feed_dict={
-                        seq_input: x,
-                        target_input: y,
-                        keep_prob: keep_probabilities
-                    }
+                    feed_dict={seq_input: x, target_input: y, keep_prob: keep_probabilities}
                 )
                 train_predictions.append(predictions)
                 train_labels.append(y)
@@ -310,7 +306,7 @@ if __name__ == '__main__':
 
     train(
         model_folder=name,
-        num_tokens=20000,
+        num_tokens=50000,
         num_hidden=256,
         attention_size=128,
         batch_size=64,
