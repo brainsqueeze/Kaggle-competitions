@@ -228,7 +228,8 @@ class AttentionSVM(object):
     def __cost(self):
         with tf.variable_scope('linear_svm_loss', reuse=tf.AUTO_REUSE):
             projection_dist = 1 - self.target * self.__output
-            loss = tf.reduce_mean(tf.nn.relu(projection_dist))
+            margin = tf.nn.relu(projection_dist)
+            loss = tf.reduce_mean(margin ** 2)
 
         with tf.variable_scope('l2_loss', reuse=tf.AUTO_REUSE):
             weights = tf.trainable_variables()
@@ -342,9 +343,30 @@ class EmbeddingLookup(object):
         
 def log(message):
     out = f"[INFO] {message}"
-    # with open(MODEL_PATH + "log.txt", "a") as f:
-    #     f.write(out)
     print(out)
+
+
+def pre_process(text):
+    text = text.strip()
+
+    # remove URLs
+    text = re.sub(r"^https?://.*[\r\n]*", "", text, re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"http\S+(\s)*(\w+\.\w+)*", "", text, re.MULTILINE | re.IGNORECASE)
+
+    # un-contract
+    text = re.sub(r"\'ve", " have ", text, re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"cant't", " cannot ", text, re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"n't", " not ", text, re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"I'm", " I am ", text, re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"\'re", " are ", text, re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"\'d", " would ", text, re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r"\'ll", " will ", text, re.MULTILINE | re.IGNORECASE)
+
+    # pad punctuation marks
+    text = re.sub(r"([!\"#\$%&\'\(\)\*\+,-\.\/:;\<\=\>\?@\[\\\]\^_`\{\|\}~])", r" \1", text, re.MULTILINE)
+    text = re.sub(r"\s{2,}", " ", text, re.MULTILINE)
+
+    return text
 
 
 def load_text(infer=False):
@@ -359,7 +381,7 @@ def load_text(infer=False):
             reader = csv.DictReader(csv_f)
             for row in reader:
                 ids.append(row["qid"])
-                texts.append(row["question_text"])
+                texts.append(pre_process(row["question_text"]))
                 targets.append(int(row.get("target", -1)))
 
     return np.array(ids), np.array(texts), np.array(targets, np.float32)
@@ -465,7 +487,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
     corpus = load_text()
 
     log("Sub-sampling to balance classes")
-    corpus = sub_sample(data=corpus, split_type="balanced")
+    corpus = sub_sample(data=corpus, split_type="skew", skew=3)
 
     log("Splitting the training and validation sets")
     train_data, cv_data = test_val_split(corpus=corpus, val_size=512)
@@ -524,7 +546,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
     with tf.Session(config=sess_config) as sess:
         sess.run(tf.global_variables_initializer())
 
-        model.assign_lr(sess, 0.5)
+        model.assign_lr(sess, 0.1)
         model.assign_clip_norm(sess, 10.0)
 
         for epoch in range(num_epochs):
@@ -594,11 +616,11 @@ if __name__ == '__main__':
 
     train(
         model_folder=name,
-        num_tokens=20000,
-        num_hidden=256,
-        attention_size=256,
+        num_tokens=100000,
+        num_hidden=64,
+        attention_size=32,
         batch_size=64,
-        num_batches=50,
-        num_epochs=200,
+        num_batches=1000,
+        num_epochs=25,
         use_tf_idf=False
     )
