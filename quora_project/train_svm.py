@@ -182,7 +182,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
 
     log("Compiling seq2seq automorphism model")
     seq_input = tf.placeholder(dtype=tf.int32, shape=[None, max_seq_len])
-    target_input = tf.placeholder(dtype=tf.float32, shape=[None,])
+    target_input = tf.placeholder(dtype=tf.float32, shape=[None, ])
     keep_prob = tf.placeholder_with_default([1.0, 1.0, 1.0], shape=(3,))
 
     file_sys = open(log_dir + "/model.json", "w")
@@ -203,7 +203,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
 
     model = AttentionSVM(
         input_x=seq_input,
-        embedding_size=512,
+        embedding_size=300,
         vocab_size=vocab_size,
         keep_prob=keep_prob,
         num_hidden=num_hidden,
@@ -243,7 +243,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, attention_size=128,
         embedding_conf.metadata_path = log_dir + "/metadata.tsv"
         tf.contrib.tensorboard.plugins.projector.visualize_embeddings(summary_writer_train, config_)
 
-        model.assign_lr(sess, 0.5)
+        model.assign_lr(sess, 0.1)
         model.assign_clip_norm(sess, 10.0)
 
         for epoch in range(num_epochs):
@@ -306,11 +306,11 @@ if __name__ == '__main__':
 
     train(
         model_folder=name,
-        num_tokens=50000,
-        num_hidden=256,
-        attention_size=128,
+        num_tokens=100000,
+        num_hidden=64,
+        attention_size=32,
         batch_size=64,
-        num_batches=50,
-        num_epochs=100,
+        num_batches=1000,
+        num_epochs=1000,
         use_tf_idf=False
     )
