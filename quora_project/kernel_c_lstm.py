@@ -622,7 +622,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, conv_size=128,
     
 
 if __name__ == '__main__':
-    folder_name = "quora_svm_v1"
+    folder_name = "quora_c_lstm_v1"
 
     train(
         model_folder=folder_name,
