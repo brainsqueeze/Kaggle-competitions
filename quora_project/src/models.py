@@ -406,7 +406,7 @@ class CnnLstm(object):
     def __cost(self, input_y):
         with tf.variable_scope('cost'):
             loss = tf.reduce_mean(
-                tf.nn.softmax_cross_entropy_with_logits(
+                tf.nn.sigmoid_cross_entropy_with_logits(
                     logits=self.__logits,
                     labels=input_y
                 )

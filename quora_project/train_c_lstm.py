@@ -307,10 +307,10 @@ if __name__ == '__main__':
     train(
         model_folder=name,
         num_tokens=100000,
-        num_hidden=64,
-        conv_size=32,
+        num_hidden=128,
+        conv_size=512,
         batch_size=64,
         num_batches=1000,
-        num_epochs=1000,
+        num_epochs=100,
         use_tf_idf=False
     )
