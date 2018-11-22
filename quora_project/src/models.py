@@ -298,7 +298,7 @@ class CnnLstm(object):
 
         # dense layer
         self.__logits = self.__dense(input_x=self.__outputs)
-        self.__probabilities = tf.nn.softmax(self.__logits)
+        self.__probabilities = tf.nn.sigmoid(self.__logits)
         self.__predictions = tf.sign(tf.nn.relu(self.__probabilities - 0.5))
 
         if is_training:
@@ -414,9 +414,10 @@ class CnnLstm(object):
 
             with tf.variable_scope('l2_loss'):
                 weights = tf.trainable_variables()
-                ls_losses = [tf.nn.l2_loss(v) for v in weights if 'weight' in v.name or 'convolution' in v.name]
+                # ls_losses = [tf.nn.l2_loss(v) for v in weights if 'weight' in v.name or 'convolution' in v.name]
+                ls_losses = [tf.nn.l2_loss(v) for v in weights if 'weight' in v.name]
 
-            loss += (1e-5 / 2) * tf.add_n(ls_losses)
+            loss += 1e-5 * tf.add_n(ls_losses)
             return loss
 
     @property

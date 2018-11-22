@@ -178,7 +178,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, conv_size=128,
     train_y, t_targets = one_hot_encoded(targets=t_targets)
     cv_x = np.array([pad_sequence(seq, max_seq_len) for seq in cv_x])
     cv_y, cv_targets = one_hot_encoded(targets=cv_targets)
-    keep_probabilities = [1.0, 0.7, 1.0]
+    keep_probabilities = [1.0, 0.9, 0.9]
 
     log("Compiling seq2seq automorphism model")
     seq_input = tf.placeholder(dtype=tf.int32, shape=[None, max_seq_len])
