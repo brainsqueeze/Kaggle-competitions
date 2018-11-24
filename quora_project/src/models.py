@@ -288,16 +288,34 @@ class CnnLstm(object):
             name = "{0}-grams".format(str(i))
             with tf.variable_scope(name):
                 x = build_conv1d(input_x, conv_width=i, conv_height=embedding_size, output_dims=conv_size)
-                x = tf.layers.batch_normalization(inputs=x, training=is_training, name='batch_norm')
-                _, final, _ = self.__encoder(x)
-                final = sum_reducer(seq_fw=final[0].c, seq_bw=final[1].c)
-                self.__outputs.append(final)
+                x = tf.nn.relu(x)
+                x = tf.layers.batch_normalization(inputs=x, trainable=is_training, name='batch_norm')
+                self.__outputs.append(x)
 
         # combine the decoded pipelines from uni-grams and bi-grams through element-wise addition
-        self.__outputs = tf.add_n(self.__outputs)
+        with tf.variable_scope('sequence-merge'):
+            self.__outputs = tf.stack(self.__outputs, axis=-1)
+            self.__outputs = tf.layers.conv2d(
+                inputs=self.__outputs,
+                filters=1,
+                kernel_size=[3, 3],
+                strides=[1, 1],
+                padding="SAME"
+            )
+            self.__outputs = tf.squeeze(self.__outputs, axis=-1)
+            self.__outputs = tf.nn.relu(self.__outputs)
+            self.__outputs = tf.layers.batch_normalization(
+                inputs=self.__outputs,
+                trainable=is_training,
+                name='batch_norm'
+            )
+
+            # biLSTM layer
+            _, final, _ = self.__encoder(self.__outputs)
+            final = sum_reducer(seq_fw=final[0].c, seq_bw=final[1].c)
 
         # dense layer
-        self.__logits = self.__dense(input_x=self.__outputs)
+        self.__logits = self.__dense(input_x=final)
         self.__probabilities = tf.nn.sigmoid(self.__logits)
         self.__predictions = tf.sign(tf.nn.relu(self.__probabilities - 0.5))
 
@@ -414,10 +432,9 @@ class CnnLstm(object):
 
             with tf.variable_scope('l2_loss'):
                 weights = tf.trainable_variables()
-                # ls_losses = [tf.nn.l2_loss(v) for v in weights if 'weight' in v.name or 'convolution' in v.name]
                 ls_losses = [tf.nn.l2_loss(v) for v in weights if 'weight' in v.name]
 
-            loss += 1e-5 * tf.add_n(ls_losses)
+            loss += 1e0 * tf.add_n(ls_losses)
             return loss
 
     @property
