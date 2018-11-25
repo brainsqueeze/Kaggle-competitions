@@ -3,133 +3,13 @@ import numpy as np
 from quora_project.src.models import CnnLstm
 
 from quora_project.src.dictionary import EmbeddingLookup
-from quora_project.src import data_utils as utils
+from quora_project.src import training_utils as utils
 
 from quora_project import config
 
 import pickle
 import json
-import csv
 import os
-
-
-def log(message):
-    print(f"[INFO] {message}")
-
-
-def load_text(infer=False):
-    path = config.DATA_PATH
-    files = ["train.csv"]
-    if infer:
-        files = ["test.csv"]
-    ids, texts, targets = [], [], []
-
-    for file in files:
-        with open(path + file, "r", encoding="latin1") as csv_f:
-            reader = csv.DictReader(csv_f)
-            for idx, row in enumerate(reader):
-                if idx > 1000:
-                    break
-                ids.append(row["qid"])
-                texts.append(utils.pre_process(row["question_text"]))
-                targets.append(int(row["target"]))
-
-    return np.array(ids), np.array(texts), np.array(targets, np.float32)
-
-
-def sub_sample(data, split_type='balanced', skew=1):
-    ids, texts, targets = data
-    assert isinstance(targets, np.ndarray)
-
-    size_pos_class = targets[targets == 1].shape[0]
-    size_neg_class = targets[targets == 0].shape[0]
-    assert split_type in {'balanced', 'skew'}
-    if split_type == 'skew':
-        assert isinstance(skew, int) and skew > 0
-
-    if split_type == 'balanced':
-        indices = np.random.permutation(range(size_neg_class))[:size_pos_class]
-    elif split_type == 'skew':
-        assert isinstance(skew, int) and skew > 0
-        indices = np.random.permutation(range(size_neg_class))[:skew * size_pos_class]
-    else:
-        raise ValueError
-
-    ids_ = np.concatenate((ids[targets == 1], ids[targets == 0][indices]))
-    texts_ = np.concatenate((texts[targets == 1], texts[targets == 0][indices]))
-    targets_ = np.concatenate((targets[targets == 1], targets[targets == 0][indices]))
-    return ids_, texts_, targets_
-
-
-def test_val_split(corpus, val_size):
-    ids, texts, targets = corpus
-    s = np.random.permutation(range(len(ids)))
-
-    cv_ids = ids[s[:val_size]]
-    cv_texts = texts[s[:val_size]]
-    cv_targets = targets[s[:val_size]]
-
-    train_ids = ids[s[val_size:]]
-    train_texts = texts[s[val_size:]]
-    train_targets = targets[s[val_size:]]
-    return (train_ids, train_texts, train_targets), (cv_ids, cv_texts, cv_targets)
-
-
-def remove_null_sequences(ids, sequences, targets):
-    ids_, sequences_, targets_ = [], [], []
-    for i in range(len(ids)):
-        seq = sequences[i]
-        if seq and len(seq) > 0:
-            ids_.append(ids[i])
-            sequences_.append(sequences[i])
-            targets_.append(targets[i])
-    return np.array(ids_), sequences_, np.array(targets_, dtype=np.float32)
-
-
-def one_hot_encoded(targets):
-    y = np.zeros(shape=(len(targets), 2), dtype=np.float32)
-    y[targets == 0, 0] = 1
-    y[targets == 1, 1] = 1
-    return y, targets
-
-
-def pad_sequence(sequence, max_sequence_length):
-    """
-    Pads individual text sequences to the maximum length
-    seen by the model at training time
-    :param sequence: list of integer lookup keys for the vocabulary (list)
-    :param max_sequence_length: (int)
-    :return: padded sequence (ndarray)
-    """
-
-    sequence = np.array(sequence, dtype=np.int32)
-    difference = max_sequence_length - sequence.shape[0]
-    pad = np.zeros((difference,), dtype=np.int32)
-    return np.concatenate((sequence, pad))
-
-
-def f1(predicted, expected):
-    tp = np.sum(predicted * expected)
-    fp = np.sum(predicted * (1 - expected))
-    fn = np.sum((1 - predicted) * expected)
-
-    precision = tp / (tp + fp) if tp + fp > 0 else 1
-    recall = tp / (tp + fn) if tp + fn > 0 else 1
-
-    f1_score = 2 * precision * recall / (precision + recall) if precision + recall > 0 else 0
-    return f1_score
-
-
-def mini_batches(corpus, size, n_batches, max_len, seed):
-    np.random.seed(seed)
-    sequences, targets = corpus
-    s = np.random.choice(range(len(targets)), replace=False, size=min(len(targets), size * n_batches)).astype(np.int32)
-
-    for mb in range(n_batches):
-        mini_batch = s[mb * size: (mb + 1) * size]
-        x = np.array([pad_sequence(sequences[index], max_len) for index in mini_batch])
-        y = targets[mini_batch]
-        yield x, y
 
 
 def train(model_folder, num_tokens=10000, num_hidden=128, conv_size=128,
@@ -140,28 +20,28 @@ def train(model_folder, num_tokens=10000, num_hidden=128, conv_size=128,
     if not os.path.exists(log_dir):
         os.mkdir(log_dir)
 
-    log("Fetching corpus and transforming to frequency domain")
-    corpus = load_text()
+    utils.log("Fetching corpus and transforming to frequency domain")
+    corpus = utils.load_text()
 
-    log("Sub-sampling to balance classes")
-    corpus = sub_sample(data=corpus, split_type="skew", skew=3)
+    utils.log("Sub-sampling to balance classes")
+    corpus = utils.sub_sample(data=corpus, split_type="skew", skew=3)
 
-    log("Splitting the training and validation sets")
-    train_data, cv_data = test_val_split(corpus=corpus, val_size=512)
+    utils.log("Splitting the training and validation sets")
+    train_data, cv_data = utils.test_val_split(corpus=corpus, val_size=512)
 
     t_ids, t_texts, t_targets = train_data
     cv_ids, cv_texts, cv_targets = cv_data
 
-    log("Fitting embedding lookup and transforming the training and cross-validation sets")
+    utils.log("Fitting embedding lookup and transforming the training and cross-validation sets")
     lookup = EmbeddingLookup(top_n=num_tokens, use_tf_idf_importance=use_tf_idf)
     full_text = lookup.fit_transform(corpus=t_texts)
     cv_x = lookup.transform(corpus=cv_texts)
 
-    log("Removing empty sequences")
-    t_ids, full_text, t_targets = remove_null_sequences(ids=t_ids, sequences=full_text, targets=t_targets)
-    cv_ids, cv_x, cv_targets = remove_null_sequences(ids=cv_ids, sequences=cv_x, targets=cv_targets)
+    utils.log("Removing empty sequences")
+    t_ids, full_text, t_targets = utils.remove_null_sequences(ids=t_ids, sequences=full_text, targets=t_targets)
+    cv_ids, cv_x, cv_targets = utils.remove_null_sequences(ids=cv_ids, sequences=cv_x, targets=cv_targets)
 
-    log("Getting the maximum sequence length and vocab size")
+    utils.log("Getting the maximum sequence length and vocab size")
     max_seq_len = max([len(seq) for seq in full_text + cv_x])
     vocab_size = max([max(seq) for seq in full_text + cv_x]) + 1
 
@@ -175,12 +55,12 @@ def train(model_folder, num_tokens=10000, num_hidden=128, conv_size=128,
         for k in reverse:
             lf.write(reverse[k] + '\n')
 
-    log(f"Padding sequences in corpus to length {max_seq_len}")
-    full_text = np.array([pad_sequence(seq, max_seq_len) for seq in full_text])
-    cv_x = np.array([pad_sequence(seq, max_seq_len) for seq in cv_x])
+        utils.log(f"Padding sequences in corpus to length {max_seq_len}")
+    full_text = np.array([utils.pad_sequence(seq, max_seq_len) for seq in full_text])
+    cv_x = np.array([utils.pad_sequence(seq, max_seq_len) for seq in cv_x])
     keep_probabilities = [0.5, 0.6, 1.0]
 
-    log("Compiling seq2seq automorphism model")
+    utils.log("Compiling seq2seq automorphism model")
     seq_input = tf.placeholder(dtype=tf.int32, shape=[None, max_seq_len])
     target_input = tf.placeholder(dtype=tf.float32, shape=[None, ])
     keep_prob = tf.placeholder_with_default([1.0, 1.0, 1.0], shape=(3,))
@@ -252,7 +132,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, conv_size=128,
             i = 1
             train_predictions, train_labels = [], []
 
-            for x, y in mini_batches(
+            for x, y in utils.mini_batches(
                     (full_text, t_targets),
                     size=batch_size,
                     n_batches=num_batches,
@@ -279,7 +159,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, conv_size=128,
 
             train_predictions = np.concatenate(train_predictions)
             train_labels = np.concatenate(train_labels)
-            f1_score = f1(predicted=train_predictions, expected=train_labels)
+            f1_score = utils.f1(predicted=train_predictions, expected=train_labels)
             train_summary.value.add(tag="f1-score", simple_value=f1_score)
             summary_writer_train.add_summary(train_summary, epoch * num_batches + i)
             summary_writer_train.flush()
@@ -289,8 +169,8 @@ def train(model_folder, num_tokens=10000, num_hidden=128, conv_size=128,
                 [model.loss, model.predict],
                 feed_dict={seq_input: cv_x, target_input: cv_targets, keep_prob: keep_probabilities}
             )
-            f1_score = f1(predicted=predictions, expected=cv_targets)
-            log(f"Cross-validation F1-score: {f1_score}")
+            f1_score = utils.f1(predicted=predictions, expected=cv_targets)
+            utils.log(f"Cross-validation F1-score: {f1_score}")
             dev_summary.value.add(tag="cost", simple_value=cv_loss)
             dev_summary.value.add(tag="f1-score", simple_value=f1_score)
             summary_writer_dev.add_summary(dev_summary, epoch * num_batches + i)

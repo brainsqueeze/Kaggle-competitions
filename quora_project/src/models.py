@@ -298,18 +298,14 @@ class CnnLstm(object):
             merge = tf.layers.conv2d(
                 inputs=self.__outputs,
                 filters=1,
-                kernel_size=[3, 1],
-                strides=[1, 1],
+                kernel_size=[3, 3],
+                strides=[2, 1],
                 padding="SAME"
             )
 
             merge = tf.squeeze(merge, axis=-1)
             merge = tf.nn.relu(merge)
-            merge = tf.layers.batch_normalization(
-                inputs=merge,
-                trainable=is_training,
-                name='batch_norm'
-            )
+            merge = tf.layers.batch_normalization(inputs=merge, trainable=is_training, name='batch_norm')
             self.__merged = merge
 
             # biLSTM layer
