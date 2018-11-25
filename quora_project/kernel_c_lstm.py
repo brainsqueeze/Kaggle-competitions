@@ -126,13 +126,34 @@ class CnnLstm(object):
             name = "{0}-grams".format(str(i))
             with tf.variable_scope(name):
                 x = build_conv1d(input_x, conv_width=i, conv_height=embedding_size, output_dims=conv_size)
-                x = tf.layers.batch_normalization(inputs=x, training=is_training, name='batch_norm')
-                _, final, _ = self.__encoder(x)
-                final = sum_reducer(seq_fw=final[0].c, seq_bw=final[1].c)
-                self.__outputs.append(final)
+                x = tf.nn.relu(x)
+                x = tf.layers.batch_normalization(inputs=x, trainable=is_training, name='batch_norm')
+                self.__outputs.append(x)
 
         # combine the decoded pipelines from uni-grams and bi-grams through element-wise addition
-        self.__outputs = tf.add_n(self.__outputs)
+        with tf.variable_scope('sequence-merge'):
+            self.__outputs = tf.stack(self.__outputs, axis=-1)
+            merge = tf.layers.conv2d(
+                inputs=self.__outputs,
+                filters=1,
+                kernel_size=[3, 1],
+                strides=[1, 1],
+                padding="SAME"
+            )
+
+            merge = tf.squeeze(merge, axis=-1)
+            merge = tf.nn.relu(merge)
+            merge = tf.layers.batch_normalization(
+                inputs=merge,
+                trainable=is_training,
+                name='batch_norm'
+            )
+            self.__merged = merge
+
+            # biLSTM layer
+            _, final, _ = self.__encoder(merge)
+            final = sum_reducer(seq_fw=final[0].c, seq_bw=final[1].c)
+            self.__lstm_final = final
 
         # dense layer
         self.__logits = self.__dense(input_x=self.__outputs)
@@ -252,9 +273,9 @@ class CnnLstm(object):
 
             with tf.variable_scope('l2_loss'):
                 weights = tf.trainable_variables()
-                ls_losses = [tf.nn.l2_loss(v) for v in weights if 'weight' in v.name or 'convolution' in v.name]
+                ls_losses = [tf.nn.l2_loss(v) for v in weights if 'weight' in v.name]
 
-            loss += (1e-5 / 2) * tf.add_n(ls_losses)
+            loss += 1e0 * tf.add_n(ls_losses)
             return loss
 
     @property
@@ -521,7 +542,7 @@ def train(model_folder, num_tokens=10000, num_hidden=128, conv_size=128,
     log(f"Padding sequences in corpus to length {max_seq_len}")
     full_text = np.array([pad_sequence(seq, max_seq_len) for seq in full_text])
     cv_x = np.array([pad_sequence(seq, max_seq_len) for seq in cv_x])
-    keep_probabilities = [1.0, 0.7, 1.0]
+    keep_probabilities = [0.5, 0.6, 1.0]
 
     log("Compiling seq2seq automorphism model")
     seq_input = tf.placeholder(dtype=tf.int32, shape=[None, max_seq_len])

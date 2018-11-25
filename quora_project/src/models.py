@@ -295,24 +295,27 @@ class CnnLstm(object):
         # combine the decoded pipelines from uni-grams and bi-grams through element-wise addition
         with tf.variable_scope('sequence-merge'):
             self.__outputs = tf.stack(self.__outputs, axis=-1)
-            self.__outputs = tf.layers.conv2d(
+            merge = tf.layers.conv2d(
                 inputs=self.__outputs,
                 filters=1,
-                kernel_size=[3, 3],
+                kernel_size=[3, 1],
                 strides=[1, 1],
                 padding="SAME"
             )
-            self.__outputs = tf.squeeze(self.__outputs, axis=-1)
-            self.__outputs = tf.nn.relu(self.__outputs)
-            self.__outputs = tf.layers.batch_normalization(
-                inputs=self.__outputs,
+
+            merge = tf.squeeze(merge, axis=-1)
+            merge = tf.nn.relu(merge)
+            merge = tf.layers.batch_normalization(
+                inputs=merge,
                 trainable=is_training,
                 name='batch_norm'
             )
+            self.__merged = merge
 
             # biLSTM layer
-            _, final, _ = self.__encoder(self.__outputs)
+            _, final, _ = self.__encoder(merge)
             final = sum_reducer(seq_fw=final[0].c, seq_bw=final[1].c)
+            self.__lstm_final = final
 
         # dense layer
         self.__logits = self.__dense(input_x=final)
@@ -444,4 +447,3 @@ class CnnLstm(object):
     @property
     def predict(self):
         return self.__predictions
-

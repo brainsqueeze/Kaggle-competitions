@@ -27,7 +27,9 @@ def load_text(infer=False):
     for file in files:
         with open(path + file, "r", encoding="latin1") as csv_f:
             reader = csv.DictReader(csv_f)
-            for row in reader:
+            for idx, row in enumerate(reader):
+                if idx > 1000:
+                    break
                 ids.append(row["qid"])
                 texts.append(utils.pre_process(row["question_text"]))
                 targets.append(int(row["target"]))
