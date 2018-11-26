@@ -152,8 +152,8 @@ class CnnLstm(object):
             self.__lstm_final = final
 
         # dense layer
-        self.__logits = self.__dense(input_x=self.__outputs)
-        self.__probabilities = tf.nn.softmax(self.__logits)
+        self.__logits = self.__dense(input_x=final)
+        self.__probabilities = tf.nn.sigmoid(self.__logits)
         self.__predictions = tf.sign(tf.nn.relu(self.__probabilities - 0.5))
 
         if is_training:
@@ -261,7 +261,7 @@ class CnnLstm(object):
     def __cost(self, input_y):
         with tf.variable_scope('cost'):
             loss = tf.reduce_mean(
-                tf.nn.softmax_cross_entropy_with_logits(
+                tf.nn.sigmoid_cross_entropy_with_logits(
                     logits=self.__logits,
                     labels=input_y
                 )
@@ -644,8 +644,8 @@ if __name__ == '__main__':
     train(
         model_folder=folder_name,
         num_tokens=100000,
-        num_hidden=64,
-        conv_size=32,
+        num_hidden=128,
+        conv_size=512,
         batch_size=64,
         num_batches=1000,
         num_epochs=25,
